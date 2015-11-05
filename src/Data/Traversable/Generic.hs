@@ -14,8 +14,8 @@ module Data.Traversable.Generic
   ) where
 
 import Control.Lens
-import Data.Traversable (fmapDefault, foldMapDefault)
-import GHC.Generics
+import GHC.Generics     (Generic1, Rep1, to1, from1, (:*:)(..), (:+:)(..),
+                         M1(..), K1(..), Rec1(..), Par1(..), U1(..), V1)
 
 -- NOTE: genericTraversal an gtraverse must be explicitly marked
 -- for inlining as they need to inline across module boundaries
@@ -87,5 +87,5 @@ instance GTraversable Par1 where
   {-# INLINE gtraverse #-}
 
 instance Traversable f => GTraversable (Rec1 f) where
-  gtraverse f (Rec1 x) = undefined
+  gtraverse f (Rec1 x) = Rec1 <$> traverse f x
   {-# INLINE gtraverse #-}

@@ -3,8 +3,6 @@ module Boggle where
 import Control.Lens
 import Data.Functor.Kan.Rift    (Rift(..), runRift)
 import Data.Functor.Yoneda      (Yoneda(..), liftYoneda, lowerYoneda)
-import GHC.Generics             (Generic1, Rep1, to1, from1,
-                                 M1(..), K1(..), Par1(..), (:*:)(..), (:+:)(..))
 
 
 ------------------------------------------------------------------------
