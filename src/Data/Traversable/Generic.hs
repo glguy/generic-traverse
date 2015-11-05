@@ -13,9 +13,10 @@ module Data.Traversable.Generic
   GTraversable
   ) where
 
+import Boggle
 import Control.Lens
 import GHC.Generics     (Generic1, Rep1, to1, from1, (:*:)(..), (:+:)(..),
-                         M1(..), K1(..), Par1(..), U1(..), V1)
+                         M1(..), K1(..), Rec1(..), Par1(..), U1(..), V1)
 
 -- NOTE: genericTraversal an gtraverse must be explicitly marked
 -- for inlining as they need to inline across module boundaries
@@ -28,7 +29,7 @@ import GHC.Generics     (Generic1, Rep1, to1, from1, (:*:)(..), (:+:)(..),
 -- | Implementation of 'traverse' for any instance of 'Generic1'.
 genericTraverse ::
   (Generic1 t, GTraversable (Rep1 t)) => Traversal (t a) (t b) a b
-genericTraverse = generic1' . gtraverse
+genericTraverse f x = lowerBoggle (to1 <$> gtraverse f (from1 x))
 {-# INLINE genericTraverse #-}
 
 generic1' :: Generic1 f => Iso (f a) (f b) (Rep1 f a) (Rep1 f b)
@@ -55,7 +56,7 @@ generic1' = iso from1 to1
 -- 'pure' Constructor3 '<*>' f a '<*>' f b '<*>' f c
 -- @
 class GTraversable t where
-  gtraverse :: Traversal (t a) (t b) a b
+  gtraverse :: Applicative f => (a -> f b) -> t a -> Boggle f (t b)
 
 instance GTraversable f => GTraversable (M1 i c f) where
   gtraverse f (M1 x) = M1 <$> gtraverse f x
@@ -83,5 +84,9 @@ instance GTraversable (K1 i a) where
   {-# INLINE gtraverse #-}
 
 instance GTraversable Par1 where
-  gtraverse f (Par1 x) = Par1 <$> f x
+  gtraverse f (Par1 x) = Par1 <$> liftBoggle (f x)
+  {-# INLINE gtraverse #-}
+
+instance Traversable t => GTraversable (Rec1 t) where
+  gtraverse f (Rec1 x) = Rec1 <$> liftBoggle (traverse f x)
   {-# INLINE gtraverse #-}

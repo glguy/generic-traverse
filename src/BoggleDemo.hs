@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 
-module BoggleDemo (Demo(..), goodTraversal) where
+module BoggleDemo (Demo(..), List(..), goodTraversal) where
 
 import Boggle                   (boggling)
 import Data.Traversable.Generic (genericTraverse)
@@ -18,7 +18,7 @@ data Demo a = Zero | Four Int a a a a
 
 instance Functor     Demo where fmap    f = fmapDefault f
 instance Foldable    Demo where foldMap f = foldMapDefault f
-instance Traversable Demo where traverse = boggling genericTraverse
+instance Traversable Demo where traverse  = genericTraverse
   -- The generated code is
   -- \f a ->
   --   case a of
@@ -32,3 +32,9 @@ badTraversal f (x,y,z) =
 goodTraversal :: Traversal' (Int,Int,Int) Int
 goodTraversal = boggling badTraversal
   -- generated code is \f (x,y,z) -> (,,) <$> f x <*> f y <*> f z
+
+data List a = Nil | Cons a (List a) deriving Generic1
+
+instance Functor     List where fmap    f = fmapDefault f
+instance Foldable    List where foldMap f = foldMapDefault f
+instance Traversable List where traverse  = genericTraverse
