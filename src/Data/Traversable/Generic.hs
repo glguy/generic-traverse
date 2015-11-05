@@ -13,11 +13,8 @@ module Data.Traversable.Generic
   GTraversable
   ) where
 
-import Control.Applicative
-import Data.Foldable (Foldable(..))
-import Data.Functor.Kan.Rift (Rift(..))
-import Data.Functor.Yoneda (Yoneda(..), liftYoneda, lowerYoneda)
-import Data.Traversable (Traversable(..), fmapDefault, foldMapDefault)
+import Control.Lens
+import Data.Traversable (fmapDefault, foldMapDefault)
 import GHC.Generics
 
 -- NOTE: genericTraversal an gtraverse must be explicitly marked
@@ -30,11 +27,13 @@ import GHC.Generics
 
 -- | Implementation of 'traverse' for any instance of 'Generic1'.
 genericTraverse ::
-  (Generic1 t, GTraversable (Rep1 t), Applicative f) =>
-  (a -> f b) -> t a -> f (t b)
-genericTraverse f x = lowerYoneda (pure to1 <*>^ gtraverse f (from1 x))
+  (Generic1 t, GTraversable (Rep1 t)) => Traversal (t a) (t b) a b
+genericTraverse = generic1' . gtraverse
 {-# INLINE genericTraverse #-}
 
+generic1' :: Generic1 f => Iso (f a) (f b) (Rep1 f a) (Rep1 f b)
+generic1' = iso from1 to1
+{-# INLINE generic1' #-}
 
 -- | The 'GTraversable' class has a method for traversing a generic
 -- structure. This function is not quite the same as 'traverse' because
@@ -56,15 +55,15 @@ genericTraverse f x = lowerYoneda (pure to1 <*>^ gtraverse f (from1 x))
 -- 'pure' Constructor3 '<*>' f a '<*>' f b '<*>' f c
 -- @
 class GTraversable t where
-  gtraverse :: Applicative f => (a -> f b) -> t a -> Rift (Yoneda f) (Yoneda f) (t b)
+  gtraverse :: Traversal (t a) (t b) a b
 
 instance GTraversable f => GTraversable (M1 i c f) where
-  gtraverse f (M1 x) = fmap M1 (gtraverse f x)
+  gtraverse f (M1 x) = M1 <$> gtraverse f x
   {-# INLINE gtraverse #-}
 
 instance (GTraversable f, GTraversable g) => GTraversable (f :+: g) where
-  gtraverse f (L1 x) = fmap L1 (gtraverse f x)
-  gtraverse f (R1 x) = fmap R1 (gtraverse f x)
+  gtraverse f (L1 x) = L1 <$> gtraverse f x
+  gtraverse f (R1 x) = R1 <$> gtraverse f x
   {-# INLINE gtraverse #-}
 
 instance (GTraversable f, GTraversable g) => GTraversable (f :*: g) where
@@ -84,27 +83,9 @@ instance GTraversable (K1 i a) where
   {-# INLINE gtraverse #-}
 
 instance GTraversable Par1 where
-  gtraverse f (Par1 x) = fmap Par1 (liftRiftYoneda (f x))
+  gtraverse f (Par1 x) = Par1 <$> f x
   {-# INLINE gtraverse #-}
 
 instance Traversable f => GTraversable (Rec1 f) where
-  gtraverse f (Rec1 x) = fmap Rec1 (liftRiftYoneda (traverse f x))
+  gtraverse f (Rec1 x) = undefined
   {-# INLINE gtraverse #-}
-
-------------------------------------------------------------------------
--- Utilities for constructing and destructing Rift and Yoneda
-------------------------------------------------------------------------
-
-liftRiftYoneda :: Applicative f => f a -> Rift (Yoneda f) (Yoneda f) a
-liftRiftYoneda fa = Rift (`yap` fa)
-{-# INLINE liftRiftYoneda #-}
-
-yap :: Applicative f => Yoneda f (a -> b) -> f a -> Yoneda f b
-yap (Yoneda k) fa = Yoneda (\ab_r -> k (ab_r .) <*> fa )
-{-# INLINE yap #-}
-
--- | Run function for 'Rift'
-(<*>^) :: f (a -> b) -> Rift f g a -> g b
-x <*>^ Rift y = y x
-infixl 4 <*>^
-{-# INLINE (<*>^) #-}
