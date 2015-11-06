@@ -60,7 +60,7 @@ liftBoggle fa = Boggle (liftYoneda fa) (liftRiftYoneda fa)
 -- 'fmap' uses that would occur with a use of 'liftYoneda' directly.
 --
 -- @
--- 'liftRift' ('liftYoneda' x)
+-- 'Data.Functor.Kan.Rift.liftRift' ('liftYoneda' x)
 -- \\a -> a            '<*>' 'liftYoneda' x
 -- \\a -> \f -> a (f '.') '<*>' 'liftYoneda' x 'id'
 -- \\a -> \f -> a (f '.') '<*>' (\\g -> 'fmap' g x) 'id'
