@@ -10,13 +10,15 @@ module Data.Traversable.Generic
   -- * Generic operations
   genericTraverse,
   -- * Implementation details
-  GTraversable
+  GTraversable(gtraverse)
   ) where
 
 import Boggle
 import Control.Lens
 import GHC.Generics     (Generic1, Rep1, to1, from1, (:*:)(..), (:+:)(..),
+                         (:.:)(..),
                          M1(..), K1(..), Rec1(..), Par1(..), U1(..), V1)
+import GHC.Exts
 
 -- NOTE: genericTraversal an gtraverse must be explicitly marked
 -- for inlining as they need to inline across module boundaries
@@ -29,32 +31,12 @@ import GHC.Generics     (Generic1, Rep1, to1, from1, (:*:)(..), (:+:)(..),
 -- | Implementation of 'traverse' for any instance of 'Generic1'.
 genericTraverse ::
   (Generic1 t, GTraversable (Rep1 t)) => Traversal (t a) (t b) a b
-genericTraverse f x = lowerBoggle (to1 <$> gtraverse f (from1 x))
+genericTraverse = \f x -> lowerBoggle (to1 <$> gtraverse f (from1 x))
 {-# INLINE genericTraverse #-}
-
-generic1' :: Generic1 f => Iso (f a) (f b) (Rep1 f a) (Rep1 f b)
-generic1' = iso from1 to1
-{-# INLINE generic1' #-}
 
 -- | The 'GTraversable' class has a method for traversing a generic
 -- structure. This function is not quite the same as 'traverse' because
 -- it uses a particular transformation on the underlying applicative functor.
---
--- 'gtraverse' implements a traversal of the generic representation
--- of a value. By using 'Rift' we ensure that the calls to
--- '<*>' will all be associated to the left. When combined with 'Yoneda'
--- these left-assoicated '<*>' will enable all of the 'fmap' calls
--- accumulated along the way to also collect on the left and fuse.
---
--- All of this fusion will put the code in a form which the GHC optimizer will
--- be able to optimize away all signs of the Generics representation. The
--- resulting traversals will look like this:
---
--- @
--- 'pure' Constructor0
--- 'pure' Constructor1 '<*>' f a
--- 'pure' Constructor3 '<*>' f a '<*>' f b '<*>' f c
--- @
 class GTraversable t where
   gtraverse :: Applicative f => (a -> f b) -> t a -> Boggle f (t b)
 
@@ -69,6 +51,10 @@ instance (GTraversable f, GTraversable g) => GTraversable (f :+: g) where
 
 instance (GTraversable f, GTraversable g) => GTraversable (f :*: g) where
   gtraverse f (x :*: y) = (:*:) <$> gtraverse f x <*> gtraverse f y
+  {-# INLINE gtraverse #-}
+
+instance (Traversable f, GTraversable g) => GTraversable (f :.: g) where
+  gtraverse f (Comp1 x) = Comp1 <$> inline traverse (gtraverse f) x
   {-# INLINE gtraverse #-}
 
 instance GTraversable U1 where
