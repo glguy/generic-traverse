@@ -1,3 +1,5 @@
+{-# LANGUAGE RankNTypes #-}
+
 -- | This module implements the 'Boggle' type which exists for its
 -- 'Applicative' instance that takes advantage of the laws of the
 -- 'Applicative' class to rearrange the applications of the underlying
@@ -7,81 +9,99 @@
 module Boggle
   ( Boggle(..)
   , boggling
-  , liftBoggle, lowerBoggle, boggled
+  , liftBoggle, lowerBoggle
+  , LensLike, Traversal, Traversal'
   -- * Implementation details
-  , liftRiftYoneda
-  , Rift'
+  , MapK(..), liftMapK, lowerMapK
+  , ApK(..), (<<.>), (<.>)
   ) where
 
-import Control.Lens
-import Data.Functor.Kan.Rift    (Rift(..), runRift)
-import Data.Functor.Yoneda      (Yoneda(..), liftYoneda, lowerYoneda)
+type LensLike f s t a b = (a -> f b) -> (s -> f t)
+type Traversal s t a b = forall f. Applicative f => LensLike f s t a b
+type Traversal' s a = Traversal s s a a
+
+newtype MapK f a = MapK (forall b. (a -> b) -> f b)
+
+instance Functor (MapK f) where
+  fmap f (MapK g) = MapK (\z -> g (z . f))
+
+liftMapK :: Functor f => f a -> MapK f a
+liftMapK fa = MapK (<$> fa)
+
+lowerMapK :: MapK f a -> f a
+lowerMapK (MapK k) = k id
 
 ------------------------------------------------------------------------
--- Control.Lens.Traversal.confusing replacement starts here
-------------------------------------------------------------------------
 
--- | When the first two arguments to 'Rift' match and have an 'Applicative'
--- instance, then 'Rift' has an 'Applicative instance.
-type Rift' f = Rift f f
+newtype ApK f a = ApK (forall b. f (a -> b) -> f b)
+
+(<<.>) :: f (a -> b) -> ApK f a -> f b
+fa <<.> ApK k = k fa
+infixl 4 <<.>
+
+(<.>) :: Functor f => ApK f (a -> b) -> ApK f a -> ApK f b
+f <.> x = ApK (\z -> (.) <$> z <<.> f <<.> x)
+                -- ≡ z <.> (f <.> x)
+infixl 4 <.>
+
+instance Functor f => Functor (ApK f) where
+  fmap f g = ApK (\z -> (.f) <$> z <<.> g)
+
+-- | The natural transformation between @f@ and @'ApK'' ('MapK' f)@.
+-- The key to this implementation is that it doesn't introduce any new
+-- 'fmap' uses that would occur with a use of 'liftMapK' directly.
+--
+-- @
+-- ('<*>' 'liftMapK' x)
+-- \\a -> a            '<*>' 'liftMapK' x
+-- \\a -> \\f -> a (f '.') '<*>' 'liftMapK' x 'id'
+-- \\a -> \\f -> a (f '.') '<*>' (\\g -> 'fmap' g x) 'id'
+-- \\a -> \\f -> a (f '.') '<*>' 'fmap' 'id' x
+-- \\a -> \\f -> a (f '.') '<*>' x
+-- @
+liftApKMapK :: Applicative f => f a -> ApK (MapK f) a
+liftApKMapK fa = ApK (\(MapK k) -> MapK (\ab_r -> k (ab_r .) <*> fa))
+{-# INLINE liftApKMapK #-}
+
+------------------------------------------------------------------------
 
 -- | @'Boggle' f@ is isomorphic to @f@ up to the 'Applicative' laws.
--- Uses of 'fmap' on this type are combined into a single use of 'fmap'
+-- Uses of '<$>' on this type are combined into a single use of '<$>'
 -- on the underlying @f@ type. Uses of 'pure' are combined and transformed
--- to 'fmap' where possible. Uses of '<*>' are reassociated to the left.
+-- to '<$>' where possible. Uses of '<*>' are reassociated to the left.
 data Boggle f a
-  = Nonpure (Yoneda f a) (Rift' (Yoneda f) a) -- | invariant: first ≡ lowerRift second
-  | Pure a
+  = Pure a
+  | Nonpure (MapK f a) (ApK (MapK f) a)
+    -- ^ invariant: first ≡ lowerRift second
 
--- | Optimize a Traversal by fusing the 'fmap's and left-associating the '<*>'s
+-- | Optimize a 'Traversal' by fusing the '<$>'s and left-associating the
+-- '<*>'s
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
-boggling = auf boggled
+boggling l = \f x -> lowerBoggle (l (liftBoggle . f) x)
 {-# INLINE boggling #-}
-
--- | The isomorphism between @f@ and @'Boggle' f@ which holds up to the
--- Applicative laws as realized by 'liftBoggle' and 'lowerBoggle'.
-boggled :: Applicative f => Iso (f a) (f b) (Boggle f a) (Boggle f b)
-boggled = iso liftBoggle lowerBoggle
-{-# INLINE boggled #-}
 
 -- | The natural transformation from @'Boggle' f@ to @f@.
 lowerBoggle :: Applicative f => Boggle f a -> f a
-lowerBoggle (Nonpure x _) = lowerYoneda x
+lowerBoggle (Nonpure x _) = lowerMapK x
 lowerBoggle (Pure x)      = pure x
 {-# INLINE lowerBoggle #-}
 
 -- | The natural transformation from @f@ to @'Boggle' f@.
 liftBoggle :: Applicative f => f a -> Boggle f a
-liftBoggle fa = Nonpure (liftYoneda fa) (liftRiftYoneda fa)
+liftBoggle fa = Nonpure (liftMapK fa) (liftApKMapK fa)
 {-# INLINE liftBoggle #-}
-
--- | The natural transformation between @f@ and @'Rift'' ('Yoneda' f)@.
--- The key to this implementation is that it doesn't introduce any new
--- 'fmap' uses that would occur with a use of 'liftYoneda' directly.
---
--- @
--- 'Data.Functor.Kan.Rift.liftRift' ('liftYoneda' x)
--- \\a -> a            '<*>' 'liftYoneda' x
--- \\a -> \f -> a (f '.') '<*>' 'liftYoneda' x 'id'
--- \\a -> \f -> a (f '.') '<*>' (\\g -> 'fmap' g x) 'id'
--- \\a -> \f -> a (f '.') '<*>' 'fmap' 'id' x
--- \\a -> \f -> a (f '.') '<*>' x
--- @
-liftRiftYoneda :: Applicative f => f a -> Rift' (Yoneda f) a
-liftRiftYoneda fa = Rift (\(Yoneda k) -> Yoneda (\ab_r -> k (ab_r .) <*> fa))
-{-# INLINE liftRiftYoneda #-}
 
 -- | Note: this instance does not rely on a 'Functor' instance for @f@
 instance Functor (Boggle f) where
-  fmap f (Nonpure x y) = Nonpure (fmap f x) (fmap f y)
+  fmap f (Nonpure x y) = Nonpure (f <$> x) (f <$> y)
   fmap f (Pure x)      = Pure (f x)
   {-# INLINE fmap #-}
 
 -- | Note: this instance does not rely on an 'Applicative' instance for @f@
 instance Applicative (Boggle f) where
   pure                          = Pure
-  Nonpure fy fr <*> Nonpure _ x = Nonpure (runRift x fy) (fr <*> x)
-  Pure f        <*> x           = fmap f x
-  f             <*> Pure x      = fmap ($ x) f
+  Nonpure f1 f2 <*> Nonpure _ x = Nonpure (f1 <<.> x) (f2 <.> x)
+  Pure f        <*> x           = f <$> x
+  f             <*> Pure x      = ($ x) <$> f
   {-# INLINE pure #-}
   {-# INLINE (<*>) #-}

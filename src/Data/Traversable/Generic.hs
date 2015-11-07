@@ -14,7 +14,6 @@ module Data.Traversable.Generic
   ) where
 
 import Boggle
-import Control.Lens
 import GHC.Generics     (Generic1, Rep1, to1, from1, (:*:)(..), (:+:)(..),
                          (:.:)(..),
                          M1(..), K1(..), Rec1(..), Par1(..), U1(..), V1)
