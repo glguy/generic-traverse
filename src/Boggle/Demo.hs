@@ -3,7 +3,7 @@
 
 -- | This module demonstrates how using 'Boogle' can enable GHC to
 -- generate more efficient code for a 'Traversal'.
-module BoggleDemo (Demo(..), NonEmpty(..), badTraversal, goodTraversal) where
+module Boggle.Demo (Demo(..), NonEmpty(..), badTraversal, goodTraversal) where
 
 import Boggle                   (Traversal', boggling)
 import Data.Traversable.Generic (genericTraverse)
