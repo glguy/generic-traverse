@@ -5,7 +5,7 @@
 -- the pure values using in 'pure' and 'fmap' calls into a single place
 -- which enables GHC to aggressively optimize them.
 module Boggle
-  ( Boggle
+  ( Boggle(..)
   , boggling
   , liftBoggle, lowerBoggle, boggled
   -- * Implementation details
@@ -30,10 +30,10 @@ type Rift' f = Rift f f
 -- on the underlying @f@ type. Uses of 'pure' are combined and transformed
 -- to 'fmap' where possible. Uses of '<*>' are reassociated to the left.
 data Boggle f a
-  = Boggle (Yoneda f a) (Rift' (Yoneda f) a)
-  | BPure a
+  = Nonpure (Yoneda f a) (Rift' (Yoneda f) a) -- | invariant: first ≡ lowerRift second
+  | Pure a
 
--- | Optimize a Traversal by using the fmaps and left-associating the (<*>)s
+-- | Optimize a Traversal by fusing the 'fmap's and left-associating the '<*>'s
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
 boggling = auf boggled
 {-# INLINE boggling #-}
@@ -46,13 +46,13 @@ boggled = iso liftBoggle lowerBoggle
 
 -- | The natural transformation from @'Boggle' f@ to @f@.
 lowerBoggle :: Applicative f => Boggle f a -> f a
-lowerBoggle (Boggle x _) = lowerYoneda x
-lowerBoggle (BPure x)    = pure x
+lowerBoggle (Nonpure x _) = lowerYoneda x
+lowerBoggle (Pure x)      = pure x
 {-# INLINE lowerBoggle #-}
 
 -- | The natural transformation from @f@ to @'Boggle' f@.
 liftBoggle :: Applicative f => f a -> Boggle f a
-liftBoggle fa = Boggle (liftYoneda fa) (liftRiftYoneda fa)
+liftBoggle fa = Nonpure (liftYoneda fa) (liftRiftYoneda fa)
 {-# INLINE liftBoggle #-}
 
 -- | The natural transformation between @f@ and @'Rift'' ('Yoneda' f)@.
@@ -71,19 +71,17 @@ liftRiftYoneda :: Applicative f => f a -> Rift' (Yoneda f) a
 liftRiftYoneda fa = Rift (\(Yoneda k) -> Yoneda (\ab_r -> k (ab_r .) <*> fa))
 {-# INLINE liftRiftYoneda #-}
 
-
-
+-- | Note: this instance does not rely on a 'Functor' instance for @f@
 instance Functor (Boggle f) where
-  fmap f (Boggle x y)   = Boggle (fmap f x) (fmap f y)
-  fmap f (BPure x)      = BPure (f x)
+  fmap f (Nonpure x y) = Nonpure (fmap f x) (fmap f y)
+  fmap f (Pure x)      = Pure (f x)
   {-# INLINE fmap #-}
 
--- | This instance takes advantage of the Applicative laws in the underlying
--- @'Applicative' f@ to reassociate '<*>' and to combine uses of 'pure'.
+-- | Note: this instance does not rely on an 'Applicative' instance for @f@
 instance Applicative (Boggle f) where
-  pure                          = BPure
-  Boggle fy fr <*> Boggle _ x   = Boggle (runRift x fy) (fr <*> x)
-  BPure f      <*> x            = fmap f x
-  f            <*> BPure x      = fmap ($ x) f
+  pure                          = Pure
+  Nonpure fy fr <*> Nonpure _ x = Nonpure (runRift x fy) (fr <*> x)
+  Pure f        <*> x           = fmap f x
+  f             <*> Pure x      = fmap ($ x) f
   {-# INLINE pure #-}
   {-# INLINE (<*>) #-}
