@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# OPTIONS_GHC -funfolding-use-threshold=500 #-}
 
 -- | This module demonstrates how using 'Boogle' can enable GHC to
 -- generate more efficient code for a 'Traversal'.
@@ -18,7 +19,7 @@ import GHC.Generics             (Generic1)
 -- | Example type featuring multiple constructors, empty constructors,
 -- constructors with many fields, and some fields in the left-most
 -- position (which would generally cause a use of 'pure')
-data Demo a = Zero | Four Int a a a a
+data Demo a = Zero | One | Two | Three | Four Int a a a
   deriving (Show, Generic1)
 
 instance Functor     Demo where fmap    f = fmapDefault f

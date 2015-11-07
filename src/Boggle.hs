@@ -80,7 +80,7 @@ instance Functor (Boggle f) where
 
 -- | This instance takes advantage of the Applicative laws in the underlying
 -- @'Applicative' f@ to reassociate '<*>' and to combine uses of 'pure'.
-instance Applicative f => Applicative (Boggle f) where
+instance Applicative (Boggle f) where
   pure                          = BPure
   Boggle fy fr <*> Boggle _ x   = Boggle (runRift x fy) (fr <*> x)
   BPure f      <*> x            = fmap f x
