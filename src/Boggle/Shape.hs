@@ -28,8 +28,12 @@ showShape :: Shape f a -> String
 showShape s = showShapePrec 0 s ""
 
 showShapePrec :: Int -> Shape f a -> ShowS
-showShapePrec _ Lift{} = showString "Lift _"
-showShapePrec _ Pure{} = showString "Pure _"
+showShapePrec p Lift{}
+  = showParen (p > 10)
+  $ showString "Lift _"
+showShapePrec p Pure{}
+  = showParen (p > 10)
+  $ showString "Pure _"
 showShapePrec p (Map _ x)
   = showParen (p > 4)
   $ showString "_ <$> "

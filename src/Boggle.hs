@@ -12,7 +12,7 @@ module Boggle
   , liftBoggle, lowerBoggle
   , LensLike, Traversal, Traversal'
   -- * Implementation details
-  , MapK(..), liftMapK, lowerMapK
+  , MapK(..), liftMapK
   , ApK(..), (<<.>), (<.>)
   ) where
 
@@ -22,14 +22,16 @@ type Traversal' s a = Traversal s s a a
 
 newtype MapK f a = MapK (forall b. (a -> b) -> f b)
 
+(<<$>) :: (a -> b) -> MapK f a -> f b
+f <<$> MapK x = x f
+infixl 4 <<$>
+
 instance Functor (MapK f) where
   fmap f (MapK g) = MapK (\z -> g (z . f))
 
 liftMapK :: Functor f => f a -> MapK f a
 liftMapK fa = MapK (<$> fa)
 
-lowerMapK :: MapK f a -> f a
-lowerMapK (MapK k) = k id
 
 ------------------------------------------------------------------------
 
@@ -45,7 +47,19 @@ f <.> x = ApK (\z -> (.) <$> z <<.> f <<.> x)
 infixl 4 <.>
 
 instance Functor f => Functor (ApK f) where
-  fmap f g = ApK (\z -> (.f) <$> z <<.> g)
+  fmap f x = ApK (\z -> (.f) <$> z <<.> x)
+
+fmapRewrite :: Applicative f => f (a -> b) -> (c -> a) -> f c -> [f b]
+fmapRewrite z f x =
+  [ z <*> (f <$> x)
+  , z <*> (pure f <*> x)
+  , pure (.) <*> z <*> pure f <*> x
+  , pure ($ f) <*> (pure (.) <*> z) <*> x
+  , pure (.) <*> pure ($ f) <*> pure (.) <*> z <*> x
+  , pure ((.) ($ f)) <*> pure (.) <*> z <*> x
+  , pure (. f) <*> z <*> x
+  , (. f) <$> z <*> x
+  ]
 
 -- | The natural transformation between @f@ and @'ApK'' ('MapK' f)@.
 -- The key to this implementation is that it doesn't introduce any new
@@ -60,7 +74,7 @@ instance Functor f => Functor (ApK f) where
 -- \\a -> \\f -> a (f '.') '<*>' x
 -- @
 liftApKMapK :: Applicative f => f a -> ApK (MapK f) a
-liftApKMapK fa = ApK (\(MapK k) -> MapK (\ab_r -> k (ab_r .) <*> fa))
+liftApKMapK fa = ApK (\z -> MapK (\ab_r -> (ab_r .) <<$> z <*> fa))
 {-# INLINE liftApKMapK #-}
 
 ------------------------------------------------------------------------
@@ -74,15 +88,14 @@ data Boggle f a
   | Nonpure (MapK f a) (ApK (MapK f) a)
     -- ^ invariant: first ≡ lowerRift second
 
--- | Optimize a 'Traversal' by fusing the '<$>'s and left-associating the
--- '<*>'s
+-- | Optimize a 'Traversal' by fusing the '<$>'s and left-associating the '<*>'s
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
 boggling l = \f x -> lowerBoggle (l (liftBoggle . f) x)
 {-# INLINE boggling #-}
 
 -- | The natural transformation from @'Boggle' f@ to @f@.
 lowerBoggle :: Applicative f => Boggle f a -> f a
-lowerBoggle (Nonpure x _) = lowerMapK x
+lowerBoggle (Nonpure x _) = id <<$> x
 lowerBoggle (Pure x)      = pure x
 {-# INLINE lowerBoggle #-}
 
