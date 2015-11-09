@@ -49,6 +49,7 @@ liftMapK fa = MapK (<$> fa)
 lowerMapK :: MapK f a -> f a
 lowerMapK fa = id <<$> fa
 
+-- | Like '<$>' but removes the 'MapK'
 (<<$>) :: (a -> b) -> MapK f a -> f b
 f <<$> MapK x = x f
 
@@ -71,8 +72,7 @@ liftApK fa = ApK (<.> fa)
 lowerApK :: Applicative f => ApK f a -> f a
 lowerApK fa = pure id <<.> fa
 
--- | This operator runs an @'ApK' f a@ value by providing the final, left-most
--- component to the left-associated chain of '<*>'.
+-- | Like '<.>' but removes 'ApK'
 (<<.>) :: f (a -> b) -> ApK f a -> f b
 fa <<.> ApK k = k fa
 
@@ -138,14 +138,20 @@ natPureK _ (Pure a)   = Pure a
 
 -- | In a perfect world, 'Apply' would be a super class of 'Applicative'.
 -- In the meantime we have 'WrappedApplicative'.
-newtype WrappedApplicative f a = Wrap { unWrap :: f a }
+newtype ApWrap f a = ApWrap (f a)
 
-instance Functor f => Functor (WrappedApplicative f) where
-  fmap f (Wrap x) = Wrap (fmap f x)
+liftApWrap :: f a -> ApWrap f a
+liftApWrap = ApWrap
+
+lowerApWrap :: ApWrap f a -> f a
+lowerApWrap (ApWrap fa) = fa
+
+instance Functor f => Functor (ApWrap f) where
+  fmap f (ApWrap x) = ApWrap (fmap f x)
 
 -- | @('<.>') = ('<*>')@
-instance Applicative f => Apply (WrappedApplicative f) where
-  Wrap f <.> Wrap x = Wrap (f <*> x)
+instance Applicative f => Apply (ApWrap f) where
+  ApWrap f <.> ApWrap x = ApWrap (f <*> x)
 
 ------------------------------------------------------------------------
 
@@ -165,15 +171,16 @@ liftMapApK fa = ApK1 (liftMapK fa) (liftApKMapK fa)
 -- on the underlying @f@ type. Uses of 'pure' are combined and transformed
 -- to '<$>' where possible. Uses of '<*>' are reassociated to the left.
 newtype Boggle f a = Boggle
-  { unBoggle :: PureK (ApK1 (MapK (WrappedApplicative f))) a }
+  { unBoggle :: PureK (ApK1 (MapK (ApWrap f))) a }
 
   deriving (Functor, Applicative)
 
 liftBoggle :: Applicative f => f a -> Boggle f a
-liftBoggle = Boggle . liftPureK . liftMapApK . Wrap
+liftBoggle = Boggle . liftPureK . liftMapApK . liftApWrap
 
 lowerBoggle :: Applicative f => Boggle f a -> f a
-lowerBoggle = lowerPureK . natPureK (unWrap . lowerMapK . lowerApK1) . unBoggle
+lowerBoggle
+  = lowerPureK . natPureK (lowerApWrap . lowerMapK . lowerApK1) . unBoggle
 
 -- | Optimize a 'Traversal' by fusing the '<$>'s and left-associating the '<*>'s
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
