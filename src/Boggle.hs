@@ -14,11 +14,12 @@ module Boggle
   -- * Abstractions
   , LensLike, Traversal, Traversal'
   , Apply(..)
+  , ApWrap(..), liftApWrap, lowerApWrap
   -- * fmap fusion
   , MapK(..), liftMapK, lowerMapK, (<<$>)
-  -- * <*> fusion
+  -- * \<*\> fusion
   , ApK(..), (<<.>), liftApK, lowerApK
-  -- * <.> fusion
+  -- * \<.\> fusion
   , ApK1(..), liftApK1, lowerApK1
   -- * pure fusion
   , PureK(..), liftPureK, lowerPureK
@@ -39,6 +40,27 @@ class Functor f => Apply f where
 
 ------------------------------------------------------------------------
 
+-- | In a perfect world, 'Apply' would be a super class of 'Applicative'.
+-- This newtype implements an 'Apply' instance in terms of an underlying
+-- 'Applicative' instance.
+newtype ApWrap f a = ApWrap (f a)
+
+liftApWrap :: f a -> ApWrap f a
+liftApWrap = ApWrap
+
+lowerApWrap :: ApWrap f a -> f a
+lowerApWrap (ApWrap fa) = fa
+
+instance Functor f => Functor (ApWrap f) where
+  fmap f (ApWrap x) = ApWrap (fmap f x)
+
+-- | @('<.>') = ('<*>')@
+instance Applicative f => Apply (ApWrap f) where
+  ApWrap f <.> ApWrap x = ApWrap (f <*> x)
+
+
+------------------------------------------------------------------------
+
 -- | This type fuses all uses of 'fmap' into a single use of 'fmap' on
 -- the underlying 'Functor' @f@.
 newtype MapK f a = MapK (forall b. (a -> b) -> f b)
@@ -53,8 +75,7 @@ lowerMapK fa = id <<$> fa
 (<<$>) :: (a -> b) -> MapK f a -> f b
 f <<$> MapK x = x f
 
--- Note that this 'Functor' instance does not rely on the underlying 'Functor'
--- instance.
+-- | Note: no underlying 'Functor' required
 instance Functor (MapK f) where
   fmap f (MapK g) = MapK (\z -> g (z . f))
 
@@ -62,8 +83,7 @@ instance Functor (MapK f) where
 
 -- | 'ApK' provides an 'Apply' instance in terms of the underlying @f@'s
 -- 'Apply' instance, but left-associates all '<.>'. Lowering this type
--- requires an 'Applicative' instance. We resolve that need with the following
--- 'ApK1' type.
+-- requires an 'Applicative' instance.
 newtype ApK f a = ApK (forall b. f (a -> b) -> f b)
 
 liftApK :: Apply f => f a -> ApK f a
@@ -79,7 +99,7 @@ fa <<.> ApK k = k fa
 instance Functor f => Functor (ApK f) where
   fmap f x = ApK (\z -> (.f) <$> z <<.> x)
 
--- Note that this 'Apply' instance only uses the underlying 'Functor'
+-- | Note that this 'Apply' instance only uses the underlying 'Functor'
 instance Functor f => Apply (ApK f) where
   f <.> x = ApK (\g -> (.) <$> g <<.> f <<.> x)
                 -- ≡ g <.> (f <.> x)
@@ -93,7 +113,7 @@ data ApK1 f a = ApK1 (f a) (ApK f a)
 instance Functor f => Functor (ApK1 f) where
   fmap f (ApK1 x y) = ApK1 (fmap f x) (fmap f y)
 
--- Note that this 'Apply' instance only uses the underlying 'Functor'
+-- | Note that this 'Apply' instance only uses the underlying 'Functor'
 instance Functor f => Apply (ApK1 f) where
   ApK1 fl fr <.> ApK1 _ x = ApK1 (fl <<.> x) (fr <.> x)
 
@@ -122,36 +142,20 @@ instance Functor f => Functor (PureK f) where
   fmap f (Pure x)  = Pure (f x)
   fmap f (Dirty x) = Dirty (fmap f x)
 
+instance Apply f => Apply (PureK f) where
+  Dirty f <.> Dirty x = Dirty (f <.> x)
+  Pure f  <.> x       = fmap f x
+  f       <.> Pure x  = fmap ($ x) f
+
 -- Note that this 'Applicative' instance only uses the underlying 'Apply'
 instance Apply f => Applicative (PureK f) where
   pure = Pure
-  Dirty f <*> Dirty x = Dirty (f <.> x)
-  Pure f  <*> x       = fmap f x
-  f       <*> Pure x  = fmap ($ x) f
+  (<*>) = (<.>)
 
 -- | Transform the underlying type.
 natPureK :: (f a -> g a) -> PureK f a -> PureK g a
 natPureK f (Dirty fa) = Dirty (f fa)
 natPureK _ (Pure a)   = Pure a
-
-------------------------------------------------------------------------
-
--- | In a perfect world, 'Apply' would be a super class of 'Applicative'.
--- In the meantime we have 'WrappedApplicative'.
-newtype ApWrap f a = ApWrap (f a)
-
-liftApWrap :: f a -> ApWrap f a
-liftApWrap = ApWrap
-
-lowerApWrap :: ApWrap f a -> f a
-lowerApWrap (ApWrap fa) = fa
-
-instance Functor f => Functor (ApWrap f) where
-  fmap f (ApWrap x) = ApWrap (fmap f x)
-
--- | @('<.>') = ('<*>')@
-instance Applicative f => Apply (ApWrap f) where
-  ApWrap f <.> ApWrap x = ApWrap (f <*> x)
 
 ------------------------------------------------------------------------
 
