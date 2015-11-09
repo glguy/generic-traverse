@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
 
 -- | This module implements the 'Boggle' type which exists for its
@@ -10,72 +11,152 @@ module Boggle
   ( Boggle(..)
   , boggling
   , liftBoggle, lowerBoggle
+  -- * Abstractions
   , LensLike, Traversal, Traversal'
-  -- * Implementation details
-  , MapK(..), liftMapK
-  , ApK(..), (<<.>), (<.>)
+  , Apply(..)
+  -- * fmap fusion
+  , MapK(..), liftMapK, lowerMapK, (<<$>)
+  -- * <*> fusion
+  , ApK(..), (<<.>), liftApK, lowerApK
+  -- * <.> fusion
+  , ApK1(..), liftApK1, lowerApK1
+  -- * pure fusion
+  , PureK(..), liftPureK, lowerPureK
   ) where
+
+infixl 4 <<$>, <<.>, <.>
 
 type LensLike f s t a b = (a -> f b) -> (s -> f t)
 type Traversal s t a b = forall f. Applicative f => LensLike f s t a b
 type Traversal' s a = Traversal s s a a
 
+-- | This class is a mid-point between 'Functor' and 'Applicative'
+-- for types that support the '<*>' operation but not 'pure'
+--
+-- > ((.) <$> f <.> g) <.> x === f <.> (g <.> x)
+class Functor f => Apply f where
+  (<.>) :: f (a -> b) -> f a -> f b
+
+------------------------------------------------------------------------
+
+-- | This type fuses all uses of 'fmap' into a single use of 'fmap' on
+-- the underlying 'Functor' @f@.
 newtype MapK f a = MapK (forall b. (a -> b) -> f b)
-
-(<<$>) :: (a -> b) -> MapK f a -> f b
-f <<$> MapK x = x f
-infixl 4 <<$>
-
-instance Functor (MapK f) where
-  fmap f (MapK g) = MapK (\z -> g (z . f))
 
 liftMapK :: Functor f => f a -> MapK f a
 liftMapK fa = MapK (<$> fa)
 
+lowerMapK :: MapK f a -> f a
+lowerMapK fa = id <<$> fa
+
+(<<$>) :: (a -> b) -> MapK f a -> f b
+f <<$> MapK x = x f
+
+-- Note that this 'Functor' instance does not rely on the underlying 'Functor'
+-- instance.
+instance Functor (MapK f) where
+  fmap f (MapK g) = MapK (\z -> g (z . f))
 
 ------------------------------------------------------------------------
 
+-- | 'ApK' provides an 'Apply' instance in terms of the underlying @f@'s
+-- 'Apply' instance, but left-associates all '<.>'. Lowering this type
+-- requires an 'Applicative' instance. We resolve that need with the following
+-- 'ApK1' type.
 newtype ApK f a = ApK (forall b. f (a -> b) -> f b)
 
+liftApK :: Apply f => f a -> ApK f a
+liftApK fa = ApK (<.> fa)
+
+lowerApK :: Applicative f => ApK f a -> f a
+lowerApK fa = pure id <<.> fa
+
+-- | This operator runs an @'ApK' f a@ value by providing the final, left-most
+-- component to the left-associated chain of '<*>'.
 (<<.>) :: f (a -> b) -> ApK f a -> f b
 fa <<.> ApK k = k fa
-infixl 4 <<.>
-
-(<.>) :: Functor f => ApK f (a -> b) -> ApK f a -> ApK f b
-f <.> x = ApK (\z -> (.) <$> z <<.> f <<.> x)
-                -- ≡ z <.> (f <.> x)
-infixl 4 <.>
 
 instance Functor f => Functor (ApK f) where
   fmap f x = ApK (\z -> (.f) <$> z <<.> x)
 
-fmapRewrite :: Applicative f => f (a -> b) -> (c -> a) -> f c -> [f b]
-fmapRewrite z f x =
-  [ z <*> (f <$> x)
-  , z <*> (pure f <*> x)
-  , pure (.) <*> z <*> pure f <*> x
-  , pure ($ f) <*> (pure (.) <*> z) <*> x
-  , pure (.) <*> pure ($ f) <*> pure (.) <*> z <*> x
-  , pure ((.) ($ f)) <*> pure (.) <*> z <*> x
-  , pure (. f) <*> z <*> x
-  , (. f) <$> z <*> x
-  ]
+-- Note that this 'Apply' instance only uses the underlying 'Functor'
+instance Functor f => Apply (ApK f) where
+  f <.> x = ApK (\g -> (.) <$> g <<.> f <<.> x)
+                -- ≡ g <.> (f <.> x)
 
--- | The natural transformation between @f@ and @'ApK'' ('MapK' f)@.
--- The key to this implementation is that it doesn't introduce any new
--- 'fmap' uses that would occur with a use of 'liftMapK' directly.
---
--- @
--- ('<*>' 'liftMapK' x)
--- \\a -> a            '<*>' 'liftMapK' x
--- \\a -> \\f -> a (f '.') '<*>' 'liftMapK' x 'id'
--- \\a -> \\f -> a (f '.') '<*>' (\\g -> 'fmap' g x) 'id'
--- \\a -> \\f -> a (f '.') '<*>' 'fmap' 'id' x
--- \\a -> \\f -> a (f '.') '<*>' x
--- @
-liftApKMapK :: Applicative f => f a -> ApK (MapK f) a
-liftApKMapK fa = ApK (\z -> MapK (\ab_r -> (ab_r .) <<$> z <*> fa))
-{-# INLINE liftApKMapK #-}
+------------------------------------------------------------------------
+
+-- | This type provides an 'Apply' instance in terms of the underlying @f@
+-- type's 'Apply' instance, but it left-associates all uses of '<.>'
+data ApK1 f a = ApK1 (f a) (ApK f a)
+
+instance Functor f => Functor (ApK1 f) where
+  fmap f (ApK1 x y) = ApK1 (fmap f x) (fmap f y)
+
+-- Note that this 'Apply' instance only uses the underlying 'Functor'
+instance Functor f => Apply (ApK1 f) where
+  ApK1 fl fr <.> ApK1 _ x = ApK1 (fl <<.> x) (fr <.> x)
+
+liftApK1 :: Apply f => f a -> ApK1 f a
+liftApK1 fa = ApK1 fa (liftApK fa)
+
+lowerApK1 :: ApK1 f a -> f a
+lowerApK1 (ApK1 fa _) = fa
+
+------------------------------------------------------------------------
+
+-- | 'PureK' lifts a type @f@ having an 'Apply' instance to a type
+-- having an 'Applicative' instance. The 'Applicative' laws for 'pure'
+-- are used to rewrite all uses of pure into either a single 'pure' or
+-- into uses of 'fmap' where possible.
+data PureK f a = Pure a | Dirty (f a)
+
+lowerPureK :: Applicative f => PureK f a -> f a
+lowerPureK (Pure a)   = pure a
+lowerPureK (Dirty fa) = fa
+
+liftPureK :: f a -> PureK f a
+liftPureK = Dirty
+
+instance Functor f => Functor (PureK f) where
+  fmap f (Pure x)  = Pure (f x)
+  fmap f (Dirty x) = Dirty (fmap f x)
+
+-- Note that this 'Applicative' instance only uses the underlying 'Apply'
+instance Apply f => Applicative (PureK f) where
+  pure = Pure
+  Dirty f <*> Dirty x = Dirty (f <.> x)
+  Pure f  <*> x       = fmap f x
+  f       <*> Pure x  = fmap ($ x) f
+
+-- | Transform the underlying type.
+natPureK :: (f a -> g a) -> PureK f a -> PureK g a
+natPureK f (Dirty fa) = Dirty (f fa)
+natPureK _ (Pure a)   = Pure a
+
+------------------------------------------------------------------------
+
+-- | In a perfect world, 'Apply' would be a super class of 'Applicative'.
+-- In the meantime we have 'WrappedApplicative'.
+newtype WrappedApplicative f a = Wrap { unWrap :: f a }
+
+instance Functor f => Functor (WrappedApplicative f) where
+  fmap f (Wrap x) = Wrap (fmap f x)
+
+-- | @('<.>') = ('<*>')@
+instance Applicative f => Apply (WrappedApplicative f) where
+  Wrap f <.> Wrap x = Wrap (f <*> x)
+
+------------------------------------------------------------------------
+
+-- | This composite lifting function takes advantage of @'fmap' 'id' = 'id@
+-- directly which would have been left behind by using 'liftMapK' followed
+-- immediately by 'lowerMapK'.
+liftMapApK :: Apply f => f a -> ApK1 (MapK f) a
+liftMapApK fa = ApK1 (liftMapK fa) (liftApKMapK fa)
+  where
+  liftApKMapK :: Apply f => f a -> ApK (MapK f) a
+  liftApKMapK fa = ApK (\z -> MapK (\ab_r -> (ab_r .) <<$> z <.> fa))
 
 ------------------------------------------------------------------------
 
@@ -83,38 +164,18 @@ liftApKMapK fa = ApK (\z -> MapK (\ab_r -> (ab_r .) <<$> z <*> fa))
 -- Uses of '<$>' on this type are combined into a single use of '<$>'
 -- on the underlying @f@ type. Uses of 'pure' are combined and transformed
 -- to '<$>' where possible. Uses of '<*>' are reassociated to the left.
-data Boggle f a
-  = Pure a
-  | Nonpure (MapK f a) (ApK (MapK f) a)
-    -- ^ invariant: first ≡ lowerRift second
+newtype Boggle f a = Boggle
+  { unBoggle :: PureK (ApK1 (MapK (WrappedApplicative f))) a }
+
+  deriving (Functor, Applicative)
+
+liftBoggle :: Applicative f => f a -> Boggle f a
+liftBoggle = Boggle . liftPureK . liftMapApK . Wrap
+
+lowerBoggle :: Applicative f => Boggle f a -> f a
+lowerBoggle = lowerPureK . natPureK (unWrap . lowerMapK . lowerApK1) . unBoggle
 
 -- | Optimize a 'Traversal' by fusing the '<$>'s and left-associating the '<*>'s
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
 boggling l = \f x -> lowerBoggle (l (liftBoggle . f) x)
 {-# INLINE boggling #-}
-
--- | The natural transformation from @'Boggle' f@ to @f@.
-lowerBoggle :: Applicative f => Boggle f a -> f a
-lowerBoggle (Nonpure x _) = id <<$> x
-lowerBoggle (Pure x)      = pure x
-{-# INLINE lowerBoggle #-}
-
--- | The natural transformation from @f@ to @'Boggle' f@.
-liftBoggle :: Applicative f => f a -> Boggle f a
-liftBoggle fa = Nonpure (liftMapK fa) (liftApKMapK fa)
-{-# INLINE liftBoggle #-}
-
--- | Note: this instance does not rely on a 'Functor' instance for @f@
-instance Functor (Boggle f) where
-  fmap f (Nonpure x y) = Nonpure (f <$> x) (f <$> y)
-  fmap f (Pure x)      = Pure (f x)
-  {-# INLINE fmap #-}
-
--- | Note: this instance does not rely on an 'Applicative' instance for @f@
-instance Applicative (Boggle f) where
-  pure                          = Pure
-  Nonpure f1 f2 <*> Nonpure _ x = Nonpure (f1 <<.> x) (f2 <.> x)
-  Pure f        <*> x           = f <$> x
-  f             <*> Pure x      = ($ x) <$> f
-  {-# INLINE pure #-}
-  {-# INLINE (<*>) #-}
