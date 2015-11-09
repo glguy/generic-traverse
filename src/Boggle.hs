@@ -174,6 +174,20 @@ liftMapApK fa = ApK1 (liftMapK fa) (liftApKMapK fa)
 -- Uses of '<$>' on this type are combined into a single use of '<$>'
 -- on the underlying @f@ type. Uses of 'pure' are combined and transformed
 -- to '<$>' where possible. Uses of '<*>' are reassociated to the left.
+--
+-- 'PureK' is on the outside because any use of 'pure' is immediately
+-- intercepted and translated into 'fmap' when needed. 'ApK1' doesn't
+-- even have/need an 'Applicative' instance.
+--
+-- 'ApK1' is next because it uses the 'Functor' instance from its underlying
+-- type and we want the 'MapK' layer to intercept and fuse all of those 'fmap'
+-- uses.
+--
+-- 'MapK1' is down toward the bottom of the stack to be able to fuse the uses
+-- of 'fmap' from all the previous layers into one single use.
+--
+-- 'ApWrap' is at the very bottom. It only exists to provide an 'Apply'
+-- instance to the underlying type @f@.
 newtype Boggle f a = Boggle
   { unBoggle :: PureK (ApK1 (MapK (ApWrap f))) a }
 
@@ -182,6 +196,11 @@ newtype Boggle f a = Boggle
 liftBoggle :: Applicative f => f a -> Boggle f a
 liftBoggle = Boggle . liftPureK . liftMapApK . liftApWrap
 
+-- | 'lowerBoggle' lowers the 'ApK1' and 'MapK' layers first before lowering
+-- the 'PureK' layer. This ensures that any 'fmap' uses in the 'PureK' layer
+-- are intercepted by the 'MapK' layer, but the final (possible) use of 'pure'
+-- in the case that 'pure' is going to be used will happen in the underlying
+-- @f@ type!
 lowerBoggle :: Applicative f => Boggle f a -> f a
 lowerBoggle
   = lowerPureK . natPureK (lowerApWrap . lowerMapK . lowerApK1) . unBoggle
