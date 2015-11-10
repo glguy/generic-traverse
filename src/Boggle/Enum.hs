@@ -16,11 +16,15 @@ module Boggle.Enum
   ( Enumerate(..)
     -- * Generically derived instances
   , GEnumerate(..)
+  , BindK(..), lowerBindK, (|||)
+    -- * List helper functions
+  , interleave
+  , (>>-)
     -- * Example
   , Demo(..), demos
   ) where
 
-import Control.Applicative      (liftA)
+import Control.Applicative      (Alternative(..), liftA)
 import Data.Void                (Void)
 import GHC.Generics
 
@@ -72,12 +76,13 @@ instance Applicative (BindK f) where
                             n $ \a  ->
                             k $ ab a
 
+instance Alternative f => Alternative (BindK f) where
+  empty = BindK $ \_ -> empty
+  BindK m <|> BindK n = BindK $ \k -> m k <|> n k
+
 -- | Run a @'BindK' f@ computation with 'pure' as the final continuation.
 lowerBindK :: Applicative f => BindK f a -> f a
 lowerBindK (BindK k) = k pure
-
-empty :: BindK [] a
-empty = BindK (\_ -> [])
 
 ------------------------------------------------------------------------
 
