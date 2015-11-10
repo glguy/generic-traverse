@@ -20,6 +20,7 @@ module Boggle.Enum
   ) where
 
 import GHC.Generics
+import Data.Void                        (Void)
 import Control.Applicative              (empty)
 import Control.Monad.Codensity          (Codensity(..), lowerCodensity)
 import Control.Monad.Logic.Class        ((>>-), interleave)
@@ -64,8 +65,10 @@ data Demo = Z Bool | S Demo
   deriving (Show, Generic)
 
 instance Enumerate Demo
-instance Enumerate Bool
+
 instance Enumerate ()
+instance Enumerate Void
+instance Enumerate Bool
 instance (Enumerate a, Enumerate b) => Enumerate (a,b)
 instance (Enumerate a, Enumerate b, Enumerate c) => Enumerate (a,b,c)
 instance (Enumerate a, Enumerate b) => Enumerate (Either a b)
