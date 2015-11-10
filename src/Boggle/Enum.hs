@@ -61,9 +61,6 @@ instance GEnumerate V1 where
 
 -- | Local implementation of @Codensity@ type from @kan-extensions@.
 -- This type captures the concept of a partially applied '>>=' function.
---
--- While this type support many other instances we focus on the ones
--- needed to implement this example.
 newtype BindK f a = BindK { runBindK :: forall b. (a -> f b) -> f b }
 
 instance Functor (BindK f) where
