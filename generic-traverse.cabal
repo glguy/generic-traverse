@@ -22,6 +22,7 @@ library
                        Boggle
                        Boggle.Shape
                        Boggle.Demo
+                       Boggle.Enum
 
   build-depends:       base >=4.8 && <4.9
 
