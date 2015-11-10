@@ -30,6 +30,9 @@ badTraversal :: Traversal' (Int,Int,Int) Int
 badTraversal f (x,y,z) =
   pure (\x' (y',z') -> (x',y',z')) <*> f x <*> ((,) <$> f y <*> f z)
 
+-- liftA2 (\x' (y',z') -> (x',y',z')) (f x) (liftA2 (,) (f y) (f z))
+-- works equally well with liftA2 directly
+
 -- | This traversal is derived from 'badTraversal' but has the same
 -- implementation as one written in a normalized way.
 goodTraversal :: Traversal' (Int,Int,Int) Int

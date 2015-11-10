@@ -16,15 +16,15 @@ module Boggle.Enum
   ( Enumerate(..)
     -- * Generically derived instances
   , GEnumerate(..)
-  , BindK(..), lowerBindK, (|||)
+  , BindK(..), lowerBindK, liftBindK
     -- * List helper functions
-  , interleave
-  , (>>-)
+  , Search(..)
     -- * Example
   , Demo(..), demos
   ) where
 
-import Control.Applicative      (Alternative(..), liftA)
+import Control.Applicative      (Alternative(..))
+import Control.Monad            (ap, liftM, MonadPlus)
 import Data.Void                (Void)
 import GHC.Generics
 
@@ -33,23 +33,23 @@ class Enumerate a where
   enumerate :: [a]
 
   default enumerate :: (Generic a, GEnumerate (Rep a)) => [a]
-  enumerate = lowerBindK (to <$> genumerate)
+  enumerate = search (lowerBindK (to <$> genumerate))
 
 
 class GEnumerate g where
-  genumerate :: BindK [] (g a)
+  genumerate :: BindK Search (g a)
 
 instance GEnumerate f => GEnumerate (M1 i c f) where
   genumerate = M1 <$> genumerate
 
 instance (GEnumerate f, GEnumerate g) => GEnumerate (f :+: g) where
-  genumerate = L1 <$> genumerate ||| R1 <$> genumerate
+  genumerate = L1 <$> genumerate <|> R1 <$> genumerate
 
 instance (GEnumerate f, GEnumerate g) => GEnumerate (f :*: g) where
   genumerate = (:*:) <$> genumerate <*> genumerate
 
 instance Enumerate b => GEnumerate (K1 i b) where
-  genumerate = K1 <$> BindK (enumerate >>-)
+  genumerate = K1 <$> liftBindK (Search enumerate)
 
 instance GEnumerate U1 where
   genumerate = pure U1
@@ -64,44 +64,58 @@ instance GEnumerate V1 where
 --
 -- While this type support many other instances we focus on the ones
 -- needed to implement this example.
-newtype BindK f a = BindK (forall b. (a -> f b) -> f b)
+newtype BindK f a = BindK { runBindK :: forall b. (a -> f b) -> f b }
 
 instance Functor (BindK f) where
-  fmap = liftA
+  fmap = liftM
 
 instance Applicative (BindK f) where
-  pure x              = BindK $ \k  -> k x
-  BindK m <*> BindK n = BindK $ \k  ->
-                            m $ \ab ->
-                            n $ \a  ->
-                            k $ ab a
+  pure x = BindK $ \k -> k x
+  (<*>)  = ap
 
 instance Alternative f => Alternative (BindK f) where
   empty = BindK $ \_ -> empty
   BindK m <|> BindK n = BindK $ \k -> m k <|> n k
+  {-# INLINE (<|>) #-}
+
+instance Monad (BindK f) where
+  BindK m >>= f = BindK $ \k -> m $ \a -> runBindK (f a) k
+
+instance Alternative f => MonadPlus (BindK f)
 
 -- | Run a @'BindK' f@ computation with 'pure' as the final continuation.
 lowerBindK :: Applicative f => BindK f a -> f a
 lowerBindK (BindK k) = k pure
 
+liftBindK :: Monad f => f a -> BindK f a
+liftBindK fa = BindK (fa >>=)
+
 ------------------------------------------------------------------------
 
--- | Combine two lists together alternating alternating from each and
--- starting with the first list.
-interleave :: [a] -> [a] -> [a]
-interleave (x:xs) ys = x : interleave ys xs
-interleave []     ys = ys
+-- | 'Search' provides a 'Monad' instance implementing fair backtracking.
+-- It satisfies the 'Monad' laws using set equality rather than strict
+-- equality.
+newtype Search a = Search { search :: [a] }
 
--- | "Fair" bind operation for lists.
-(>>-) :: [a] -> (a -> [b]) -> [b]
-[]     >>- _ = []
-(x:xs) >>- f = interleave (f x) (xs >>- f)
+instance Functor Search where
+  fmap = liftM
 
--- | 'interleave' operation lifted to 'BindK'
-(|||) :: BindK [] a -> BindK [] a -> BindK [] a
-BindK m ||| BindK n = BindK (\k -> interleave (m k) (n k))
+instance Applicative Search where
+  pure x = Search [x]
+  (<*>)  = ap
 
-infixl 3 |||
+-- | Interleaving bind
+instance Monad Search where
+  Search []     >>= _ = empty
+  Search (x:xs) >>= f = f x <|> (Search xs >>= f)
+
+-- | Interleaving of two searches
+instance Alternative Search where
+  empty                = Search empty
+  Search (x:xs) <|> ys = Search (x : search (ys <|> Search xs))
+  Search []     <|> ys = ys
+
+instance MonadPlus Search
 
 ------------------------------------------------------------------------
 
