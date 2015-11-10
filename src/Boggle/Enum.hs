@@ -17,7 +17,7 @@ module Boggle.Enum
     -- * Generically derived instances
   , GEnumerate(..)
     -- * Example
-  , demos
+  , Demo(..), demos
   ) where
 
 import Control.Applicative      (liftA)
