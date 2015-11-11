@@ -7,6 +7,35 @@
 -- the pure values using in 'pure' and 'fmap' calls into a single place
 -- which enables GHC to aggressively optimize them.
 --
+-- == Optimization Goals
+--
+-- The goal for rewriting values defined in terms of 'Applicative' operations
+-- will be to normalize them into a form that gives GHC the most opportunity
+-- to simply the resulting expression as possible without knowing anything
+-- about the particular 'Applicative' instance that that it satisfies the class
+-- laws.
+--
+-- The following type characterizes our desired normal form.
+--
+-- > data Normal :: (* -> *) -> * -> * where
+-- >   Pure    :: a           -> Normal f a
+-- >   Normal1 :: Normal1 f a -> Normal f a
+--
+-- > data Normal1 :: (* -> *) -> * -> * where
+-- >   Ap      :: Normal1 f (a -> b) -> f a -> Normal1 f b
+-- >   Normal2 :: Normal2 f a               -> Normal1 f a
+--
+-- > data Normal2 :: (* -> *) -> * -> * where
+-- >   Fmap :: (a -> b) -> f a -> Normal2 f b -- function ≠ 'id'
+-- >   Lift ::             f a -> Normal2 f a
+--
+-- While this type on its own is simpler than some of the types that follow,
+-- implementing '<$>' and '<*>' for this type would require recusion to deal
+-- with the left-recursion found in this type:
+--
+-- > f <$> Ap mg mx   = Ap ((f .) <$> mg) mx
+-- > f <$> Normal2 mx = Normal2 (f <$> x)
+--
 -- == Optimization Techniques
 --
 -- This transformation uses four primary techniques to achieve optimization.
