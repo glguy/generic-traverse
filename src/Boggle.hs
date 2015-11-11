@@ -35,14 +35,25 @@ type Traversal' s a = Traversal s s a a
 -- | This class is a mid-point between 'Functor' and 'Applicative'
 -- for types that support the '<*>' operation but not 'pure'
 --
--- > ((.) <$> f <.> g) <.> x === f <.> (g <.> x)
+-- It provides an operation for lifted function application ('<.>')
+--
+-- Implementations of this class must follow this law:
+--
+-- [/composition/]
+--
+--   * @(('.') '<$>' f '<.>' g) '<.>' x = f '<.>' (g '<.>' x)@
+--
+-- If @f@ is an 'Applicative', it should satisfy
+--
+--   * @'<.>' = '<*>'@
 class Functor f => Apply f where
+  -- | Lifted application
   (<.>) :: f (a -> b) -> f a -> f b
+  {-# MINIMAL (<.>) #-}
 
 ------------------------------------------------------------------------
 
--- | In a perfect world, 'Apply' would be a super class of 'Applicative'.
--- This newtype implements an 'Apply' instance in terms of an underlying
+-- | 'ApWrap' provides an 'Apply' instance in terms of an underlying
 -- 'Applicative' instance.
 newtype ApWrap f a = ApWrap (f a)
 
@@ -87,6 +98,7 @@ instance Functor (MapK f) where
 -- | 'MapK1' extends 'MapK' to detect when a lift is immediately followed
 -- by a lower. In this case no 'fmap' will be used at all!
 data MapK1 f a = MapK1 (f a) (MapK f a)
+  -- ^ Invariant: @(x :: f a) == 'lowerMapK' (y :: 'MapK' f a)
 
 liftMapK1 :: Functor f => f a -> MapK1 f a
 liftMapK1 fa = MapK1 fa (liftMapK fa)
@@ -145,6 +157,7 @@ instance Functor f => Apply (ApK f) where
 -- | This type provides an 'Apply' instance in terms of the underlying @f@
 -- type's 'Apply' instance, but it left-associates all uses of '<.>'
 data ApK1 f a = ApK1 (f a) (ApK f a)
+    -- ^ Invariant: @(x :: f a) == 'lowerApK' (y :: 'ApK' f a)@
 
 instance Functor f => Functor (ApK1 f) where
   fmap f (ApK1 x y) = ApK1 (f <$> x) (f <$> y)
