@@ -213,6 +213,7 @@ instance Applicative (Boggle f) where
 
 liftBoggle :: Applicative f => f a -> Boggle f a
 liftBoggle = Boggle . liftPureK . liftApK1 . liftMapK1 . liftApWrap
+{-# INLINE liftBoggle #-}
 
 -- | 'lowerBoggle' lowers the 'ApK1' and 'MapK' layers first before lowering
 -- the 'PureK' layer. This ensures that any 'fmap' uses in the 'PureK' layer
@@ -222,6 +223,7 @@ liftBoggle = Boggle . liftPureK . liftApK1 . liftMapK1 . liftApWrap
 lowerBoggle :: Applicative f => Boggle f a -> f a
 lowerBoggle
   = lowerPureK . natPureK (lowerApWrap . lowerMapK1 . lowerApK1) . unBoggle
+{-# INLINE lowerBoggle #-}
 
 -- | Optimize a 'Traversal' by fusing the '<$>'s and left-associating the '<*>'s
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
