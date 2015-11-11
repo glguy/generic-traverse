@@ -53,7 +53,7 @@ lowerApWrap :: ApWrap f a -> f a
 lowerApWrap (ApWrap fa) = fa
 
 instance Functor f => Functor (ApWrap f) where
-  fmap f (ApWrap x) = ApWrap (fmap f x)
+  fmap f (ApWrap x) = ApWrap (f <$> x)
 
 -- | @('<.>') = ('<*>')@
 instance Applicative f => Apply (ApWrap f) where
@@ -78,7 +78,9 @@ f <<$> MapK x = x f
 
 -- | Note: no underlying 'Functor' required
 instance Functor (MapK f) where
-  fmap f (MapK g) = MapK (\z -> g (z . f))
+  fmap f x = MapK (\z -> (z . f) <<$> x)
+                -- z <$> (f <$> x)
+                -- (z . f) <$> x
 
 ------------------------------------------------------------------------
 
@@ -97,8 +99,12 @@ instance Functor (MapK1 f) where
   fmap f (MapK1 _ g) = MapK1 (f <<$> g) (f <$> g)
 
 instance Apply f => Apply (MapK1 f) where
-  MapK1 m1 m2 <.> MapK1 n _ =
-    MapK1 (m1 <.> n) (MapK (\k -> (k .) <<$> m2 <.> n))
+  MapK1 f g <.> MapK1 x _ = MapK1 (f <.> x) (MapK (\k -> (.) k <<$> g <.> x))
+  -- k <$> (g <.> x)
+  -- pure k <.> (g <.> x)
+  -- pure (.) <.> pure k <.> g <.> x
+  -- pure ((.) k) <.> g <.> x
+  -- (.) k <$> g <.> x
 
 ------------------------------------------------------------------------
 
@@ -118,12 +124,21 @@ lowerApK fa = pure id <<.> fa
 fa <<.> ApK k = k fa
 
 instance Functor f => Functor (ApK f) where
-  fmap f x = ApK (\z -> (.f) <$> z <<.> x)
+  fmap f x = ApK (\g -> (.f) <$> g <<.> x)
+                -- g <.> (f <$> x)
+                -- g <.> (pure f <.> x)
+                -- pure (.) <.> g <.> pure f <.> x
+                -- pure ($ f) <.> (pure (.) <.> g) <.> x
+                -- pure (.) <.> pure ($ f) <.> pure (.) <.> g <.> x
+                -- pure ((.) ($ f) (.)) <.> g <.> x
+                -- (. f) <$> g <.> x
 
 -- | Note that this 'Apply' instance only uses the underlying 'Functor'
 instance Functor f => Apply (ApK f) where
   f <.> x = ApK (\g -> (.) <$> g <<.> f <<.> x)
-                -- ≡ g <.> (f <.> x)
+                -- g <.> (f <.> x)
+                -- pure (.) <.> g <.> f <.> x
+                -- (.) <$> g <.> f <.> x
 
 ------------------------------------------------------------------------
 
@@ -132,7 +147,7 @@ instance Functor f => Apply (ApK f) where
 data ApK1 f a = ApK1 (f a) (ApK f a)
 
 instance Functor f => Functor (ApK1 f) where
-  fmap f (ApK1 x y) = ApK1 (fmap f x) (fmap f y)
+  fmap f (ApK1 x y) = ApK1 (f <$> x) (f <$> y)
 
 -- | Note that this 'Apply' instance only uses the underlying 'Functor'
 instance Functor f => Apply (ApK1 f) where
@@ -161,12 +176,12 @@ liftPureK = Dirty
 
 instance Functor f => Functor (PureK f) where
   fmap f (Pure x)  = Pure (f x)
-  fmap f (Dirty x) = Dirty (fmap f x)
+  fmap f (Dirty x) = Dirty (f <$> x)
 
 instance Apply f => Apply (PureK f) where
   Dirty f <.> Dirty x = Dirty (f <.> x)
-  Pure f  <.> x       = fmap f x
-  f       <.> Pure x  = fmap ($ x) f
+  Pure f  <.> x       = f <$> x
+  f       <.> Pure x  = ($ x) <$> f
 
 -- Note that this 'Applicative' instance only uses the underlying 'Apply'
 instance Apply f => Applicative (PureK f) where
@@ -202,7 +217,7 @@ newtype Boggle f a = Boggle
   { unBoggle :: PureK (ApK1 (MapK1 (ApWrap f))) a }
 
 instance Functor (Boggle f) where
-  fmap f (Boggle x) = Boggle (fmap f x)
+  fmap f (Boggle x) = Boggle (f <$> x)
   {-# INLINE fmap #-}
 
 instance Applicative (Boggle f) where
