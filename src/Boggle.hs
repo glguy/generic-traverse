@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
 
 -- | This module implements the 'Boggle' type which exists for its
@@ -62,22 +61,27 @@ instance Applicative f => Apply (ApWrap f) where
 ------------------------------------------------------------------------
 
 -- | This type fuses all uses of 'fmap' into a single use of 'fmap' on
--- the underlying 'Functor' @f@.
-newtype MapK f a = MapK (forall b. (a -> b) -> f b)
+-- the underlying 'Functor' @f@. In the case that no 'fmap' is used,
+-- no underlying 'fmap' will be used.
+data MapK f a = MapK (f a) (forall b. (a -> b) -> f b)
 
 liftMapK :: Functor f => f a -> MapK f a
-liftMapK fa = MapK (<$> fa)
+liftMapK fa = MapK fa (<$> fa)
 
 lowerMapK :: MapK f a -> f a
-lowerMapK fa = id <<$> fa
+lowerMapK (MapK fa _) = fa
 
 -- | Like '<$>' but removes the 'MapK'
 (<<$>) :: (a -> b) -> MapK f a -> f b
-f <<$> MapK x = x f
+f <<$> MapK _ x = x f
 
 -- | Note: no underlying 'Functor' required
 instance Functor (MapK f) where
-  fmap f (MapK g) = MapK (\z -> g (z . f))
+  fmap f (MapK _ g) = MapK (g f) (\z -> g (z . f))
+
+instance Apply f => Apply (MapK f) where
+  m <.> n = MapK (lowerMapK m <.> lowerMapK n)
+                 (\k -> (k .) <<$> m <.> lowerMapK n)
 
 ------------------------------------------------------------------------
 
@@ -159,17 +163,6 @@ natPureK _ (Pure a)   = Pure a
 
 ------------------------------------------------------------------------
 
--- | This composite lifting function takes advantage of @'fmap' 'id' = 'id@
--- directly which would have been left behind by using 'liftMapK' followed
--- immediately by 'lowerMapK'.
-liftMapApK :: Apply f => f a -> ApK1 (MapK f) a
-liftMapApK fa = ApK1 (liftMapK fa) (liftApKMapK fa)
-  where
-  liftApKMapK :: Apply f => f a -> ApK (MapK f) a
-  liftApKMapK fa = ApK (\z -> MapK (\ab_r -> (ab_r .) <<$> z <.> fa))
-
-------------------------------------------------------------------------
-
 -- | @'Boggle' f@ is isomorphic to @f@ up to the 'Applicative' laws.
 -- Uses of '<$>' on this type are combined into a single use of '<$>'
 -- on the underlying @f@ type. Uses of 'pure' are combined and transformed
@@ -191,10 +184,18 @@ liftMapApK fa = ApK1 (liftMapK fa) (liftApKMapK fa)
 newtype Boggle f a = Boggle
   { unBoggle :: PureK (ApK1 (MapK (ApWrap f))) a }
 
-  deriving (Functor, Applicative)
+instance Functor (Boggle f) where
+  fmap f (Boggle x) = Boggle (fmap f x)
+  {-# INLINE fmap #-}
+
+instance Applicative (Boggle f) where
+  pure = \x -> Boggle (pure x)
+  {-# INLINE pure #-}
+  Boggle x <*> Boggle y = Boggle (x <*> y)
+  {-# INLINE (<*>) #-}
 
 liftBoggle :: Applicative f => f a -> Boggle f a
-liftBoggle = Boggle . liftPureK . liftMapApK . liftApWrap
+liftBoggle = Boggle . liftPureK . liftApK1 . liftMapK . liftApWrap
 
 -- | 'lowerBoggle' lowers the 'ApK1' and 'MapK' layers first before lowering
 -- the 'PureK' layer. This ensures that any 'fmap' uses in the 'PureK' layer
