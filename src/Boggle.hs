@@ -6,6 +6,54 @@
 -- type's 'Applicative' instance. These transformations collect all of
 -- the pure values using in 'pure' and 'fmap' calls into a single place
 -- which enables GHC to aggressively optimize them.
+--
+-- == Optimization Techniques
+--
+-- This transformation uses four primary techniques to achieve optimization.
+--
+-- [/avoid recursion/]
+--
+--     Recursive functions interfere with GHC's ability to inline and optimize
+--     function applications. Each of the following transformations will need
+--     to be written in a way that enables GHC to inline all of the definitions
+--     and optimize away all of the intermediate structures. If the
+--     intermediate structures or the operations on them were written
+--     recursively this would not be possible.
+--
+-- [/multiple equivalent representations/]
+--
+--     There are cases where we don't know what the optimal representation for
+--     a value will be until that value is actually used. In the following code
+--     we see this happen with 'MapK1' and 'ApK1'. Due to inlining and
+--     optimization the representation that was no needed can be eliminated
+--     at use time.
+--
+-- [/free structures/]
+--
+--     In order to optimize values according to laws that they satisfy, we'll
+--     need the structures that these laws operate over to be explicit. This
+--     will enable the operations to determine when a transformation is
+--     appropriate and apply it.
+--
+--     'MapK' tracks the eventual argument to 'fmap'. 'ApK' tracks the eventual
+--     left-most argument to '<.>'. 'PureK' tracks uses of 'pure'.
+--
+-- [/typed tagless final encodings/]
+--
+--     The /typed tagless final/ approach for writing a computation involves
+--     defining the signature of the operations that a compution can be
+--     constructed from and then defining values completely within that
+--     signature. This technique will specifically apply to computations
+--     written generically in terms of the 'Applicative' signature.
+--
+--     Because the 'Applicative' signature carries a number of laws that
+--     any interpretation of it must satisfy, we are able to write our
+--     own interpretations in terms of existing interpretations but which
+--     use the laws that these existing interpretations must satisfy.
+--
+--     It happens that it is now quite common to define computations in this
+--     style with classes like 'Functor' and 'Applicative' due to the
+--     popularlity of the @lens@ package and it's heavy use of this pattern.
 module Boggle
   ( Boggle(..)
   , boggling
@@ -41,7 +89,12 @@ type Traversal' s a = Traversal s s a a
 --
 -- [/composition/]
 --
---   * @(('.') '<$>' f '<.>' g) '<.>' x = f '<.>' (g '<.>' x)@
+--   prop> (\\f g x -> f (g x)) '<$>' mf '<.>' mg '<.>' mx = mf '<.>' (mg '<.>' mx)
+--
+-- [/interchange/]
+--
+--   prop> (\\g x -> f (g x)) '<$>' mg '<.>' mx = f '<$>' (mg '<.>' mx)
+--   prop> (\\g x -> g (f x)) '<$>' mg '<.>' mx = mg '<.>' (f '<$>' mx)
 --
 -- If @f@ is an 'Applicative', it should satisfy
 --
@@ -90,8 +143,6 @@ f <<$> MapK x = x f
 -- | Note: no underlying 'Functor' required
 instance Functor (MapK f) where
   fmap f x = MapK (\z -> (z . f) <<$> x)
-                -- z <$> (f <$> x)
-                -- (z . f) <$> x
 
 ------------------------------------------------------------------------
 
@@ -111,12 +162,8 @@ instance Functor (MapK1 f) where
   fmap f (MapK1 _ g) = MapK1 (f <<$> g) (f <$> g)
 
 instance Apply f => Apply (MapK1 f) where
-  MapK1 f g <.> MapK1 x _ = MapK1 (f <.> x) (MapK (\k -> (.) k <<$> g <.> x))
-  -- k <$> (g <.> x)
-  -- pure k <.> (g <.> x)
-  -- pure (.) <.> pure k <.> g <.> x
-  -- pure ((.) k) <.> g <.> x
-  -- (.) k <$> g <.> x
+  MapK1 f g <.> MapK1 x _ =
+    MapK1 (f <.> x) (MapK (\k -> (\a b -> k (a b)) <<$> g <.> x))
 
 ------------------------------------------------------------------------
 
@@ -136,21 +183,11 @@ lowerApK fa = pure id <<.> fa
 fa <<.> ApK k = k fa
 
 instance Functor f => Functor (ApK f) where
-  fmap f x = ApK (\g -> (.f) <$> g <<.> x)
-                -- g <.> (f <$> x)
-                -- g <.> (pure f <.> x)
-                -- pure (.) <.> g <.> pure f <.> x
-                -- pure ($ f) <.> (pure (.) <.> g) <.> x
-                -- pure (.) <.> pure ($ f) <.> pure (.) <.> g <.> x
-                -- pure ((.) ($ f) (.)) <.> g <.> x
-                -- (. f) <$> g <.> x
+  fmap f x = ApK (\g -> (\a b -> a (f b)) <$> g <<.> x)
 
 -- | Note that this 'Apply' instance only uses the underlying 'Functor'
 instance Functor f => Apply (ApK f) where
   f <.> x = ApK (\g -> (.) <$> g <<.> f <<.> x)
-                -- g <.> (f <.> x)
-                -- pure (.) <.> g <.> f <.> x
-                -- (.) <$> g <.> f <.> x
 
 ------------------------------------------------------------------------
 
