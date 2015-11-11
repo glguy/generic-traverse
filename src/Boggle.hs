@@ -16,6 +16,8 @@ module Boggle
   , ApWrap(..), liftApWrap, lowerApWrap
   -- * fmap fusion
   , MapK(..), liftMapK, lowerMapK, (<<$>)
+  -- * fmap fusion with fmap id law
+  , MapK1(..), liftMapK1, lowerMapK1
   -- * \<*\> fusion
   , ApK(..), (<<.>), liftApK, lowerApK
   -- * \<.\> fusion
@@ -61,27 +63,42 @@ instance Applicative f => Apply (ApWrap f) where
 ------------------------------------------------------------------------
 
 -- | This type fuses all uses of 'fmap' into a single use of 'fmap' on
--- the underlying 'Functor' @f@. In the case that no 'fmap' is used,
--- no underlying 'fmap' will be used.
-data MapK f a = MapK (f a) (forall b. (a -> b) -> f b)
+-- the underlying 'Functor' @f@.
+newtype MapK f a = MapK (forall b. (a -> b) -> f b)
 
 liftMapK :: Functor f => f a -> MapK f a
-liftMapK fa = MapK fa (<$> fa)
+liftMapK fa = MapK (<$> fa)
 
 lowerMapK :: MapK f a -> f a
-lowerMapK (MapK fa _) = fa
+lowerMapK (MapK k) = k id
 
 -- | Like '<$>' but removes the 'MapK'
 (<<$>) :: (a -> b) -> MapK f a -> f b
-f <<$> MapK _ x = x f
+f <<$> MapK x = x f
 
 -- | Note: no underlying 'Functor' required
 instance Functor (MapK f) where
-  fmap f (MapK _ g) = MapK (g f) (\z -> g (z . f))
+  fmap f (MapK g) = MapK (\z -> g (z . f))
 
-instance Apply f => Apply (MapK f) where
-  m <.> n = MapK (lowerMapK m <.> lowerMapK n)
-                 (\k -> (k .) <<$> m <.> lowerMapK n)
+------------------------------------------------------------------------
+
+-- | 'MapK1' extends 'MapK' to detect when a lift is immediately followed
+-- by a lower. In this case no 'fmap' will be used at all!
+data MapK1 f a = MapK1 (f a) (MapK f a)
+
+liftMapK1 :: Functor f => f a -> MapK1 f a
+liftMapK1 fa = MapK1 fa (liftMapK fa)
+
+lowerMapK1 :: MapK1 f a -> f a
+lowerMapK1 (MapK1 fa _) = fa
+
+-- | Note: no underlying 'Functor' required
+instance Functor (MapK1 f) where
+  fmap f (MapK1 _ g) = MapK1 (f <<$> g) (f <$> g)
+
+instance Apply f => Apply (MapK1 f) where
+  MapK1 m1 m2 <.> MapK1 n _ =
+    MapK1 (m1 <.> n) (MapK (\k -> (k .) <<$> m2 <.> n))
 
 ------------------------------------------------------------------------
 
@@ -182,7 +199,7 @@ natPureK _ (Pure a)   = Pure a
 -- 'ApWrap' is at the very bottom. It only exists to provide an 'Apply'
 -- instance to the underlying type @f@.
 newtype Boggle f a = Boggle
-  { unBoggle :: PureK (ApK1 (MapK (ApWrap f))) a }
+  { unBoggle :: PureK (ApK1 (MapK1 (ApWrap f))) a }
 
 instance Functor (Boggle f) where
   fmap f (Boggle x) = Boggle (fmap f x)
@@ -195,7 +212,7 @@ instance Applicative (Boggle f) where
   {-# INLINE (<*>) #-}
 
 liftBoggle :: Applicative f => f a -> Boggle f a
-liftBoggle = Boggle . liftPureK . liftApK1 . liftMapK . liftApWrap
+liftBoggle = Boggle . liftPureK . liftApK1 . liftMapK1 . liftApWrap
 
 -- | 'lowerBoggle' lowers the 'ApK1' and 'MapK' layers first before lowering
 -- the 'PureK' layer. This ensures that any 'fmap' uses in the 'PureK' layer
@@ -204,7 +221,7 @@ liftBoggle = Boggle . liftPureK . liftApK1 . liftMapK . liftApWrap
 -- @f@ type!
 lowerBoggle :: Applicative f => Boggle f a -> f a
 lowerBoggle
-  = lowerPureK . natPureK (lowerApWrap . lowerMapK . lowerApK1) . unBoggle
+  = lowerPureK . natPureK (lowerApWrap . lowerMapK1 . lowerApK1) . unBoggle
 
 -- | Optimize a 'Traversal' by fusing the '<$>'s and left-associating the '<*>'s
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
