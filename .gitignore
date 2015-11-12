@@ -2,3 +2,5 @@
 /dist
 /.stack-work
 stack.yaml
+*.hi
+*.o
