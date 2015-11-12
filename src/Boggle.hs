@@ -54,7 +54,7 @@
 --     There are cases where we don't know what the optimal representation for
 --     a value will be until that value is actually used. In the following code
 --     we see this happen with 'MapK1' and 'ApK1'. Due to inlining and
---     optimization the representation that was no needed can be eliminated
+--     optimization the representation that was not needed can be eliminated
 --     at use time.
 --
 -- [/free structures/]
@@ -92,14 +92,14 @@ module Boggle
   , Apply(..)
   , ApWrap(..), liftApWrap, lowerApWrap
   -- * fmap fusion
-  , MapK(..), liftMapK, lowerMapK, (<<$>)
+  , MapK(..), (<<$>), liftMapK, lowerMapK
   -- * fmap fusion with fmap id law
   , MapK1(..), liftMapK1, lowerMapK1
-  -- * \<*\> fusion
+  -- * '<*>' reassociation
   , ApK(..), (<<.>), liftApK, lowerApK
-  -- * \<.\> fusion
+  -- * '<.>' reassociation
   , ApK1(..), liftApK1, lowerApK1
-  -- * pure fusion
+  -- * pure elminination
   , PureK(..), liftPureK, lowerPureK
   ) where
 
@@ -118,12 +118,12 @@ type Traversal' s a = Traversal s s a a
 --
 -- [/composition/]
 --
---   prop> (\\f g x -> f (g x)) '<$>' mf '<.>' mg '<.>' mx = mf '<.>' (mg '<.>' mx)
+--   * @(\\f g x -> f (g x)) '<$>' mf '<.>' mg '<.>' mx = mf '<.>' (mg '<.>' mx)@
 --
 -- [/interchange/]
 --
---   prop> (\\g x -> f (g x)) '<$>' mg '<.>' mx = f '<$>' (mg '<.>' mx)
---   prop> (\\g x -> g (f x)) '<$>' mg '<.>' mx = mg '<.>' (f '<$>' mx)
+--   * @(\\g x -> f (g x)) '<$>' mg '<.>' mx = f '<$>' (mg '<.>' mx)@
+--   * @(\\g x -> g (f x)) '<$>' mg '<.>' mx = mg '<.>' (f '<$>' mx)@
 --
 -- If @f@ is an 'Applicative', it should satisfy
 --
@@ -163,7 +163,7 @@ liftMapK :: Functor f => f a -> MapK f a
 liftMapK fa = MapK (<$> fa)
 
 lowerMapK :: MapK f a -> f a
-lowerMapK (MapK k) = k id
+lowerMapK fa = id <<$> fa
 
 -- | Like '<$>' but removes the 'MapK'
 (<<$>) :: (a -> b) -> MapK f a -> f b
@@ -300,7 +300,7 @@ instance Functor (Boggle f) where
   {-# INLINE fmap #-}
 
 instance Applicative (Boggle f) where
-  pure = \x -> Boggle (pure x)
+  pure x = Boggle (pure x)
   {-# INLINE pure #-}
   Boggle x <*> Boggle y = Boggle (x <*> y)
   {-# INLINE (<*>) #-}
