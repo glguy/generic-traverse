@@ -5,17 +5,34 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Boggle.Read where
+-- | This module demonstrates using 'BindK' to optimize a generic
+-- implementation of the 'readsPrec' function. The immediate benefit
+-- of doing the implementation within 'BindK' is that all of the uses
+-- of 'fmap' in the implementation will be able to fuse into a single
+-- pure function. Combined with inlining, this will gather the use of
+-- 'to' with all of the generic representation constructors into the same
+-- expression which GHC can then replace with the actual constructor.
+module Boggle.Read
+  ( -- * Generic 'readsPrec' implementation
+    genericReadsPrec
+    -- * 'ReadS' wrapper
+  , Parse(..), lexP, readP, readParenP
+    -- * Generic implementation classes
+  , GRead(..), Fields(..)
+    -- * Example uses
+  , readUnit, readBool, readEither, readTriple
+  ) where
 
-import Control.Applicative
-import Control.Monad
-import Data.Proxy
+import Control.Applicative      (Alternative(..), liftA2)
+import Control.Monad            (MonadPlus, liftM, ap, guard)
+import Data.Proxy               (Proxy(..))
 import GHC.Generics
 
-import Boggle (BindK(..), lowerBindK, liftBindK, liftBindK1)
+import Boggle                   (BindK(..), lowerBindK, liftBindK, liftBindK1)
 
 ------------------------------------------------------------------------
 
+-- | 'Parse' wraps 'ReadS' in order to provide various typeclass instances.
 newtype Parse a = Parse { runParse :: ReadS a }
 
 instance Functor Parse where
@@ -34,68 +51,96 @@ instance Alternative Parse where
 
 instance MonadPlus Parse
 
+-- | Returns the next lexeme using 'lex'
 lexP :: Parse String
 lexP = Parse lex
 
+-- | Parse a value using 'readPrec'
 readP :: Read a => Int -> Parse a
 readP = Parse . readsPrec
 
-readParenP :: Bool -> Parse a -> Parse a
+-- | Wrap a parser to support nested parentheses. When the first argument
+-- is 'True' parenthesis are required.
+readParenP :: Bool {- ^ parenthesis required -} -> Parse a -> Parse a
 readParenP b = Parse . readParen b . runParse
 
 ------------------------------------------------------------------------
 
+-- | Derived implementation of 'readsPrec' using generics.
 genericReadsPrec :: (Generic a, GRead (Rep a)) => Int -> ReadS a
 genericReadsPrec p = runParse (lowerBindK (to <$> greadsPrec p))
 
+-- | Class for types that support generically derived 'readsPrec' functions.
+--
+-- The first argument is the precedence of the surrounding context.
+--
+-- This class uses the 'BindK' monad transfomer to reassociate all binds to
+-- the right. This ensures that the use of the generics representation will
+-- be able to collect into a single pure Haskell function enabling GHC to
+-- optimize the generic representations away.
 class GRead f where
-  greadsPrec :: Int -> BindK Parse (f a)
+  greadsPrec :: Int {- ^ precedence -} -> BindK Parse (f a)
 
--- | Used for 'D1' and 'S1'
-instance GRead f => GRead (M1 i c f) where
+instance GRead f => GRead (D1 c f) where
   greadsPrec p = M1 <$> greadsPrec p
-
-instance {-# OVERLAPPING #-}
-  (Constructor c, GRead f, HasFields f) => GRead (C1 c f) where
-  greadsPrec p
-    = liftBindK1 (readParenP (p > 10 && hasFields (Proxy :: Proxy f)))
-    $ do str <- liftBindK lexP
-         guard (str == conName (M1 Proxy :: C1 c Proxy ()))
-         M1 <$> greadsPrec 11
-  {-# INLINE greadsPrec #-}
 
 instance (GRead f, GRead g) => GRead (f :+: g) where
   greadsPrec p = L1 <$> greadsPrec p <|> R1 <$> greadsPrec p
 
-instance (GRead f, GRead g) => GRead (f :*: g) where
-  greadsPrec _ = liftA2 (:*:) (greadsPrec 11) (greadsPrec 11)
-
-instance GRead U1 where
-  greadsPrec _ = pure U1
-
 instance GRead V1 where
   greadsPrec _ = empty
 
-instance Read a => GRead (K1 i a) where
-  greadsPrec p = K1 <$> liftBindK (readP p)
+instance (Constructor c, Fields f) => GRead (C1 c f) where
+  greadsPrec p
+    = liftBindK1 (readParenP (p > 10 && hasFields (Proxy :: Proxy f)))
+    $ do str <- liftBindK lexP
+         guard (str == conName (M1 Proxy :: C1 c Proxy ()))
+         M1 <$> parseFields
+  {-# INLINE greadsPrec #-}
 
--- | This class helps determine when parentheses will be needed
-class HasFields (f :: * -> *) where hasFields :: proxy f -> Bool
--- | No fields
-instance HasFields U1 where hasFields _ = False
--- | Multiple fields
-instance HasFields (f :*: g) where hasFields _ = True
--- | Single field
-instance HasFields (M1 i c f) where hasFields _ = True
+------------------------------------------------------------------------
 
-readunit :: Int -> ReadS ()
-readunit = genericReadsPrec
+-- | This class provides methods for parsing the fields of constructors
+class Fields f where
 
-readboolean :: Int -> ReadS Bool
-readboolean = genericReadsPrec
+  -- | Parse the fields in a generic representation. Leaf fields will be
+  -- read at precedence 11 because they are always in the context of a
+  -- constructor application.
+  parseFields :: BindK Parse (f a)
 
-reador :: (Read a, Read b) => Int -> ReadS (Either a b)
-reador = genericReadsPrec
+  -- | Return 'True' if this generic structure has any fields at all.
+  -- This is used by the constructor parser to decide when parentheses
+  -- are necessary.
+  hasFields :: proxy f -> Bool
+  hasFields _ = True
 
-readthree :: (Read a, Read b, Read c) => Int -> ReadS (a,b,c)
-readthree = genericReadsPrec
+instance Fields f => Fields (S1 s f) where
+  parseFields = M1 <$> parseFields
+
+instance (Fields f, Fields g) => Fields (f :*: g) where
+  parseFields = liftA2 (:*:) parseFields parseFields
+
+instance Fields U1 where
+  parseFields = pure U1
+  hasFields _ = False
+
+instance Read a => Fields (K1 i a) where
+  parseFields = K1 <$> liftBindK (readP 11)
+
+------------------------------------------------------------------------
+
+-- | Derived implementation of 'readsPrec' for '()'
+readUnit :: Int -> ReadS ()
+readUnit = genericReadsPrec
+
+-- | Derived implementation of 'readsPrec' for 'Bool'
+readBool :: Int -> ReadS Bool
+readBool = genericReadsPrec
+
+-- | Derived implementation of 'readsPrec' for 'Either'
+readEither :: (Read a, Read b) => Int -> ReadS (Either a b)
+readEither = genericReadsPrec
+
+-- | Derived implementation of 'readsPrec' for '(,,)'
+readTriple :: (Read a, Read b, Read c) => Int -> ReadS (a,b,c)
+readTriple = genericReadsPrec
