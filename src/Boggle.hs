@@ -114,7 +114,7 @@ type Traversal' s a = Traversal s s a a
 --
 -- It provides an operation for lifted function application ('<.>')
 --
--- Implementations of this class must follow this law:
+-- Implementations of this class must follow these laws:
 --
 -- [/composition/]
 --
@@ -157,6 +157,10 @@ instance Applicative f => Apply (ApWrap f) where
 
 -- | This type fuses all uses of 'fmap' into a single use of 'fmap' on
 -- the underlying 'Functor' @f@.
+--
+-- There is a natural isomorphism between @f@ and @'MapK' f@ witnessed by
+-- 'liftMapK' and 'lowerMapK' which is respected by the 'Functor' instance
+-- of @'MapK' f@.
 newtype MapK f a = MapK (forall b. (a -> b) -> f b)
 
 liftMapK :: Functor f => f a -> MapK f a
@@ -177,6 +181,10 @@ instance Functor (MapK f) where
 
 -- | 'MapK1' extends 'MapK' to detect when a lift is immediately followed
 -- by a lower. In this case no 'fmap' will be used at all!
+--
+-- There is a natural isomorphism between @f@ and @'MapK1' f@ witnessed by
+-- 'liftMapK1' and 'lowerMapK1' which is respected by the 'Functor' and
+-- 'Apply' instance of @'MapK1' f@.
 data MapK1 f a = MapK1 (f a) (MapK f a)
   -- ^ Invariant: @(x :: f a) == 'lowerMapK' (y :: 'MapK' f a)
 
@@ -199,6 +207,10 @@ instance Apply f => Apply (MapK1 f) where
 -- | 'ApK' provides an 'Apply' instance in terms of the underlying @f@'s
 -- 'Apply' instance, but left-associates all '<.>'. Lowering this type
 -- requires an 'Applicative' instance.
+--
+-- There is a natural isomorphism between @f@ and @'ApK' f@ witnessed by
+-- 'liftApK' and 'lowerApK' which is respected by the 'Functor' and
+-- 'Apply' instance of @'ApK' f@.
 newtype ApK f a = ApK (forall b. f (a -> b) -> f b)
 
 liftApK :: Apply f => f a -> ApK f a
@@ -222,6 +234,10 @@ instance Functor f => Apply (ApK f) where
 
 -- | This type provides an 'Apply' instance in terms of the underlying @f@
 -- type's 'Apply' instance, but it left-associates all uses of '<.>'
+--
+-- There is a natural isomorphism between @f@ and @'ApK1' f@ witnessed by
+-- 'liftApK1' and 'lowerApK1' which is respected by the 'Functor' and
+-- 'Apply' instance of @'ApK1' f@.
 data ApK1 f a = ApK1 (f a) (ApK f a)
     -- ^ Invariant: @(x :: f a) == 'lowerApK' (y :: 'ApK' f a)@
 
@@ -244,6 +260,10 @@ lowerApK1 (ApK1 fa _) = fa
 -- having an 'Applicative' instance. The 'Applicative' laws for 'pure'
 -- are used to rewrite all uses of pure into either a single 'pure' or
 -- into uses of 'fmap' where possible.
+--
+-- There is a natural isomorphism between @f@ and @'PureK' f@ witnessed by
+-- 'liftPureK' and 'lowerPureK' which is respected by the 'Functor',
+-- 'Apply', and 'Applicative' instance of @'PureK' f@.
 data PureK f a = Pure a | Dirty (f a)
 
 lowerPureK :: Applicative f => PureK f a -> f a
@@ -292,8 +312,11 @@ natPureK _ (Pure a)   = Pure a
 --
 -- 'ApWrap' is at the very bottom. It only exists to provide an 'Apply'
 -- instance to the underlying type @f@.
-newtype Boggle f a = Boggle
-  { unBoggle :: PureK (ApK1 (MapK1 (ApWrap f))) a }
+--
+-- There is a natural isomorphism between @f@ and @'Boggle' f@ witnessed by
+-- 'liftBoggle' and 'lowerBoggle' which is respected by the 'Functor',
+-- 'Apply', and 'Applicative' instance of @'Boggle' f@.
+newtype Boggle f a = Boggle (PureK (ApK1 (MapK1 (ApWrap f))) a)
 
 instance Functor (Boggle f) where
   fmap f (Boggle x) = Boggle (f <$> x)
@@ -316,10 +339,13 @@ liftBoggle = Boggle . liftPureK . liftApK1 . liftMapK1 . liftApWrap
 -- @f@ type!
 lowerBoggle :: Applicative f => Boggle f a -> f a
 lowerBoggle
-  = lowerPureK . natPureK (lowerApWrap . lowerMapK1 . lowerApK1) . unBoggle
+  = lowerPureK . natPureK (lowerApWrap . lowerMapK1 . lowerApK1) . (\(Boggle b) -> b)
 {-# INLINE lowerBoggle #-}
 
 -- | Optimize a 'Traversal' by fusing the '<$>'s and left-associating the '<*>'s
+--
+-- This function will only work well on non-recursive traversals. For an example
+-- of using this technique on recursive cases see "Data.Traversable.Generic".
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
 boggling l = \f x -> lowerBoggle (l (liftBoggle . f) x)
 {-# INLINE boggling #-}
