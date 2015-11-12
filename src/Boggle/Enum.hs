@@ -16,7 +16,6 @@ module Boggle.Enum
   ( Enumerate(..)
     -- * Generically derived instances
   , GEnumerate(..)
-  , BindK(..), lowerBindK, liftBindK
     -- * List helper functions
   , Search(..)
     -- * Example
@@ -27,6 +26,8 @@ import Control.Applicative      (Alternative(..))
 import Control.Monad            (ap, liftM, MonadPlus)
 import Data.Void                (Void)
 import GHC.Generics
+
+import Boggle                   (BindK(..), liftBindK, lowerBindK)
 
 -- | This class provides a list of all the elements of a type.
 class Enumerate a where
@@ -56,37 +57,6 @@ instance GEnumerate U1 where
 
 instance GEnumerate V1 where
   genumerate = empty
-
-------------------------------------------------------------------------
-
--- | Local implementation of @Codensity@ type from @kan-extensions@.
--- This type captures the concept of a partially applied '>>=' function.
-newtype BindK f a = BindK { runBindK :: forall b. (a -> f b) -> f b }
-
-instance Functor (BindK f) where
-  fmap = liftM
-
-instance Applicative (BindK f) where
-  pure x = BindK $ \k -> k x
-  (<*>)  = ap
-
-instance Alternative f => Alternative (BindK f) where
-  empty = BindK $ \_ -> empty
-  BindK m <|> BindK n = BindK $ \k -> m k <|> n k
-  {-# INLINE (<|>) #-}
-
-instance Monad (BindK f) where
-  BindK m >>= f = BindK $ \k -> m $ \a -> runBindK (f a) k
-
-instance Alternative f => MonadPlus (BindK f)
-
--- | Run a @'BindK' f@ computation with 'pure' as the final continuation.
-lowerBindK :: Applicative f => BindK f a -> f a
-lowerBindK (BindK k) = k pure
-
-liftBindK :: Monad f => f a -> BindK f a
-liftBindK fa = BindK (fa >>=)
-
 ------------------------------------------------------------------------
 
 -- | 'Search' provides a 'Monad' instance implementing fair backtracking.

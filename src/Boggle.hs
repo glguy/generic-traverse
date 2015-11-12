@@ -101,7 +101,12 @@ module Boggle
   , ApK1(..), liftApK1, lowerApK1
   -- * pure elminination
   , PureK(..), liftPureK, lowerPureK
+  -- * '>>=' reassociation
+  , BindK(..), liftBindK, lowerBindK, liftBindK1, liftBindK2
   ) where
+
+import Control.Applicative
+import Control.Monad
 
 infixl 4 <<$>, <<.>, <.>
 
@@ -349,3 +354,40 @@ lowerBoggle
 boggling :: Applicative f => LensLike (Boggle f) s t a b -> LensLike f s t a b
 boggling l = \f x -> lowerBoggle (l (liftBoggle . f) x)
 {-# INLINE boggling #-}
+
+
+------------------------------------------------------------------------
+
+-- | Local implementation of @Codensity@ type from @kan-extensions@.
+-- This type captures the concept of a partially applied '>>=' function.
+newtype BindK f a = BindK { runBindK :: forall b. (a -> f b) -> f b }
+
+instance Functor (BindK f) where
+  fmap = liftM
+
+instance Applicative (BindK f) where
+  pure x = BindK $ \k -> k x
+  (<*>)  = ap
+
+instance Alternative f => Alternative (BindK f) where
+  empty = BindK $ \_ -> empty
+  (<|>) = liftBindK2 (<|>)
+  {-# INLINE (<|>) #-}
+
+instance Monad (BindK f) where
+  BindK m >>= f = BindK $ \k -> m $ \a -> runBindK (f a) k
+
+instance Alternative f => MonadPlus (BindK f)
+
+-- | Run a @'BindK' f@ computation with 'pure' as the final continuation.
+lowerBindK :: Applicative f => BindK f a -> f a
+lowerBindK (BindK k) = k pure
+
+liftBindK :: Monad f => f a -> BindK f a
+liftBindK fa = BindK (fa >>=)
+
+liftBindK1 :: (forall a. f a -> f a) -> BindK f b -> BindK f b
+liftBindK1 f (BindK k) = BindK (f . k)
+
+liftBindK2 :: (forall a. f a -> f a -> f a) -> BindK f b -> BindK f b -> BindK f b
+liftBindK2 f (BindK m) (BindK n) = BindK (\k -> f (m k) (n k))
