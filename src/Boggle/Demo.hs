@@ -1,5 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# OPTIONS_GHC -funfolding-use-threshold=500 #-}
+{-# OPTIONS_GHC -funfolding-use-threshold=5000 -funfolding-creation-threshold=1500 #-}
 
 -- | This module demonstrates how using 'Boogle' can enable GHC to
 -- generate more efficient code for a 'Traversal'.
