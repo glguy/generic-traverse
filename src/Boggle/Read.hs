@@ -12,6 +12,8 @@
 -- pure function. Combined with inlining, this will gather the use of
 -- 'to' with all of the generic representation constructors into the same
 -- expression which GHC can then replace with the actual constructor.
+--
+-- This implementation does not parse record syntax.
 module Boggle.Read
   ( -- * Generic 'readsPrec' implementation
     genericReadsPrec
@@ -55,7 +57,7 @@ instance MonadPlus Parse
 lexP :: Parse String
 lexP = Parse lex
 
--- | Parse a value using 'readPrec'
+-- | Parse a value using 'readsPrec'
 readP :: Read a => Int -> Parse a
 readP = Parse . readsPrec
 
@@ -81,15 +83,19 @@ genericReadsPrec p = runParse (lowerBindK (to <$> greadsPrec p))
 class GRead f where
   greadsPrec :: Int {- ^ precedence -} -> BindK Parse (f a)
 
+-- | Data type metadata
 instance GRead f => GRead (D1 c f) where
   greadsPrec p = M1 <$> greadsPrec p
 
+-- | Multiple constructors
 instance (GRead f, GRead g) => GRead (f :+: g) where
   greadsPrec p = L1 <$> greadsPrec p <|> R1 <$> greadsPrec p
 
+-- | No constructors
 instance GRead V1 where
   greadsPrec _ = empty
 
+-- | One constructor
 instance (Constructor c, Fields f) => GRead (C1 c f) where
   greadsPrec p
     = liftBindK1 (readParenP (p > 10 && hasFields (Proxy :: Proxy f)))
@@ -114,16 +120,20 @@ class Fields f where
   hasFields :: proxy f -> Bool
   hasFields _ = True
 
+-- | Field metadata
 instance Fields f => Fields (S1 s f) where
   parseFields = M1 <$> parseFields
 
+-- | Multiple fields
 instance (Fields f, Fields g) => Fields (f :*: g) where
   parseFields = liftA2 (:*:) parseFields parseFields
 
+-- | No fields
 instance Fields U1 where
   parseFields = pure U1
   hasFields _ = False
 
+-- | Single field
 instance Read a => Fields (K1 i a) where
   parseFields = K1 <$> liftBindK (readP 11)
 
