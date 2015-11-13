@@ -9,7 +9,7 @@ import Boggle                   (Traversal', boggling)
 import Data.Traversable.Generic (genericTraverse)
 
 import Data.Traversable         (fmapDefault, foldMapDefault)
-import GHC.Generics             (Generic1)
+import GHC.Generics             (Generic, Generic1)
 
 ------------------------------------------------------------------------
 -- Example use of 'boggling' operator to optimize a Traversal
@@ -19,7 +19,7 @@ import GHC.Generics             (Generic1)
 -- constructors with many fields, and some fields in the left-most
 -- position (which would generally cause a use of 'pure')
 data Demo a = Zero | One | Two | Three | Four Int a a a
-  deriving (Show, Generic1)
+  deriving (Show, Generic, Generic1)
 
 instance Functor     Demo where fmap    f = fmapDefault f
 instance Foldable    Demo where foldMap f = foldMapDefault f
@@ -41,7 +41,8 @@ goodTraversal = boggling badTraversal
 
 -- | This type exists to demonstrate how the technique works on
 -- recursive data types.
-data NonEmpty a = Cons a (Maybe (NonEmpty a)) deriving Generic1
+data NonEmpty a = Cons a (Maybe (NonEmpty a))
+  deriving (Show, Generic, Generic1)
 
 instance Functor     NonEmpty where fmap    f = fmapDefault f
 instance Foldable    NonEmpty where foldMap f = foldMapDefault f
