@@ -30,7 +30,7 @@ import GHC.Exts         (inline)
 -- | Implementation of 'traverse' for any instance of 'Generic1'.
 genericTraverse ::
   (Generic1 t, GTraversable (Rep1 t)) => Traversal (t a) (t b) a b
-genericTraverse = \f x -> lowerBoggle (to1 <$> gtraverse f (from1 x))
+genericTraverse f x = lowerBoggle (to1 <$> gtraverse f (from1 x))
 {-# INLINE genericTraverse #-}
 
 -- | The 'GTraversable' class has a method for traversing a generic
