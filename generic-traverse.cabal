@@ -24,6 +24,7 @@ source-repository head
 library
   exposed-modules:     Data.Traversable.Generic
                        Data.Functor.Rep.Generic
+                       Data.Functor.Rep.GenericLens
                        Boggle
                        Boggle.Shape
                        Boggle.Demo

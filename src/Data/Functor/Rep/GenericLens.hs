@@ -1,36 +1,28 @@
 {-# OPTIONS -funfolding-use-threshold=1000 -funfolding-creation-threshold=1000 #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE BangPatterns #-}
-module Data.Functor.Rep.GenericsLens where
+module Data.Functor.Rep.GenericLens
+  ( -- * Generic implementation of Representable class
+    genericTabulate, genericIndex, E(..)
+    -- * Implementation class
+  , GTabulate(..)
+    -- * Example
+  , V3(..), v3tabulate, v3index
+  ) where
 
-import Control.Lens
-import Control.Monad.Fix
-import Control.Monad.Zip
-import Data.Distributive
-import Data.Functor.Rep
-import Data.Traversable
-import Data.Traversable.Generic
+import Boggle (MapK, lowerMapK, liftMapK)
+import Control.Applicative (Const(..))
 import GHC.Generics
-import GHC.Generics.Lens
 
 data V3 a = V3 a a a deriving (Show, Generic1)
 
-instance Distributive  V3 where distribute  = distributeRep
-instance Foldable      V3 where foldMap     = foldMapDefault
-instance Traversable   V3 where traverse    = genericTraverse
-instance Functor       V3 where fmap        = fmapDefault
-instance Applicative   V3 where pure        = pureRep
-                                (<*>)       = apRep
-instance Monad         V3 where (>>=)       = bindRep
-instance MonadZip      V3 where mzipWith    = mzipWithRep
-instance MonadFix      V3 where mfix        = mfixRep
-instance Representable V3 where type Rep V3 = E V3
-                                tabulate    = genericTabulate
-                                index       = genericIndex
+v3tabulate :: (E V3 -> a) -> V3 a
+v3tabulate = genericTabulate
+
+v3index :: V3 a -> E V3 -> a
+v3index = genericIndex
 
 
 
@@ -61,8 +53,8 @@ instance GTabulate f => GTabulate (M1 i c f) where
 
 -- | Multiple fields
 instance (GTabulate f, GTabulate g) => GTabulate (f :*: g) where
-  gtabulate f = gtabulate (f . comp _1')
-            :*: gtabulate (f . comp _2')
+  gtabulate f = gtabulate (f . comp _1)
+            :*: gtabulate (f . comp _2)
 
 -- | No fields
 instance GTabulate U1 where
@@ -75,3 +67,31 @@ instance GTabulate Par1 where
 -- Helper function for composing a 'Lens' and 'E'
 comp :: (forall a. Lens' (u a) (t a)) -> E t -> E u
 comp l e = E (l . eLens e)
+
+------------------------------------------------------------------------
+-- Local copy of lens definitions
+------------------------------------------------------------------------
+
+type LensLike' f s a = (a -> f a) -> s -> f s
+type Lens' s a = forall f. Functor f => LensLike' f s a
+
+generic1 :: Generic1 f => Lens' (f a) (Rep1 f a)
+generic1 f x = to1 <$> f (from1 x)
+
+view :: LensLike' (Const a) s a -> s -> a
+view l x = getConst (l Const x)
+
+fusing :: Functor f => LensLike' (MapK f) s a -> LensLike' f s a
+fusing l f x = lowerMapK (l (liftMapK . f) x)
+
+_Par1 :: Lens' (Par1 a) a
+_Par1 f (Par1 x) = Par1 <$> f x
+
+_1 :: Lens' ((f :*: g) a) (f a)
+_1 f (x :*: y) = (:*: y) <$> f x
+
+_2 :: Lens' ((f :*: g) a) (g a)
+_2 f (x :*: y) = (x :*:) <$> f y
+
+_M1 :: Lens' (M1 i c f a) (f a)
+_M1 f (M1 x) = M1 <$> f x
