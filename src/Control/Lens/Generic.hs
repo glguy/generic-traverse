@@ -1,14 +1,10 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE
+ DataKinds, TypeFamilies,
+ TypeOperators,
+ MultiParamTypeClasses, UndecidableInstances, FlexibleContexts, FlexibleInstances,
+ ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes #-}
+
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE OverloadedLabels #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE TypeApplications, AllowAmbiguousTypes #-}
 
 module Control.Lens.Generic (genericOptic) where
 
@@ -32,7 +28,7 @@ type family GOpticCx n f t :: Constraint where
   GOpticCx n (f :+: g) t = (GOpticCx n f t, GOpticCx n g t)
   GOpticCx n (C1 c f)  t = GOpticConCx (Find n f) t
 
-type family GOpticConCx p where
+type family GOpticConCx (p :: Maybe Path) where
   GOpticConCx 'Nothing  = Applicative
   GOpticConCx ('Just x) = Functor
 
@@ -71,8 +67,7 @@ instance f ~ g => GOpticCon 'Nothing f g a b where
   {-# Inline gopticCon #-}
 
 -- | Constructors that do have this field require a lens
-instance (GLens p f g, PathType p f ~ a, PathType p g ~ b) =>
-         GOpticCon ('Just p) f g a b where
+instance GLens p f g a b => GOpticCon ('Just p) f g a b where
   gopticCon = glens @p
   {-# Inline gopticCon #-}
 
@@ -84,49 +79,38 @@ instance (GLens p f g, PathType p f ~ a, PathType p g ~ b) =>
 -- the data type. The parameters @f@ and @g@ are allowed
 -- to vary just enough to allow the type of the focused field
 -- to change.
-class GLens (p :: Path) f g where
-  glens :: Lens (f a) (g a) (PathType p f) (PathType p g)
+class GLens (p :: Path) f g a b where
+  glens :: Lens (f x) (g x) a b
 
-instance GLens p f g => GLens ('GoLeft p) (f :*: x) (g :*: x) where
+instance GLens p f g a b => GLens ('GoLeft p) (f :*: x) (g :*: x) a b where
   glens = _1 . glens @p
   {-# Inline glens #-}
 
-instance GLens p f g => GLens ('GoRight p) (x :*: f) (x :*: g) where
+instance GLens p f g a b => GLens ('GoRight p) (x :*: f) (x :*: g) a b where
   glens = _2 . glens @p
   {-# Inline glens #-}
 
-instance GLens p f g => GLens p (S1 c f) (S1 d g) where
+instance GLens p f g a b => GLens p (S1 c f) (S1 d g) a b where
   glens = _M1 . glens @p
   {-# Inline glens #-}
 
-instance GLens p (K1 i a) (K1 i b) where
+instance GLens p (K1 i a) (K1 i b) a b where
   glens = _K1
   {-# Inline glens #-}
 
 
-
-
-type family PathType p f where
-  PathType p (M1 i c f) = PathType p f
-  PathType ('GoLeft p) (f :*: g) = PathType p f
-  PathType ('GoRight p) (f :*: g) = PathType p g
-  PathType p (K1 i a) = a
-
 data{-kind-} Path = Here | GoLeft Path | GoRight Path
 
-type family MapMaybe (f :: a -> b) (m :: Maybe a) :: Maybe b where
-  MapMaybe f ('Just x) = 'Just (f x)
-  MapMaybe f 'Nothing  = 'Nothing
-
-type family OrElse (m :: Maybe a) (n :: Maybe a) :: Maybe a where
-  OrElse ('Just x) y = 'Just x
-  OrElse 'Nothing  y = y
+type family OrElse (m :: Maybe Path) (n :: Maybe Path) :: Maybe Path where
+  OrElse ('Just x) y = 'Just ('GoLeft x)
+  OrElse x ('Just y) = 'Just ('GoRight y)
+  OrElse x y         = 'Nothing
 
 type family Find (s :: Symbol) (hay :: * -> *) :: Maybe Path where
   Find s (D1 c f) = Find s f
   Find s (C1 c f) = Find s f
   Find s (S1 ('MetaSel ('Just s) x y z) f) = 'Just 'Here
-  Find s (x :*: y) = MapMaybe 'GoLeft (Find s x) `OrElse` MapMaybe 'GoRight (Find s y)
+  Find s (x :*: y) = Find s x `OrElse` Find s y
   Find s t = 'Nothing
 
 
