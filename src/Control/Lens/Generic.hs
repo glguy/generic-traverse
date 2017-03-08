@@ -11,7 +11,6 @@ module Control.Lens.Generic (genericOptic) where
 import Control.Lens hiding (from,to)
 import GHC.TypeLits
 import Data.Kind
-import GHC.OverloadedLabels
 import GHC.Generics
 import GHC.Generics.Lens
 import Boggle (boggling)
@@ -20,98 +19,73 @@ import Boggle (boggling)
 -- Class for generically deriving lenses
 ------------------------------------------------------------------------
 
--- | If the field @n@ exists in all of the constructors represented by
--- the GHC.Generics Rep for a type, this computes the constraint @Functor t@,
--- otherwise it computes the constraint @Applicative t@.
-type family GOpticCx n f t :: Constraint where
-  GOpticCx n (D1 c f)  t = GOpticCx n f t
-  GOpticCx n (f :+: g) t = (GOpticCx n f t, GOpticCx n g t)
-  GOpticCx n (C1 c f)  t = GOpticConCx (Find n f) t
+type family Cx p t :: Constraint where
+  Cx 'Skip        t = Applicative t
+  Cx ('Both f g)  t = (Cx f t, Cx g t)
+  Cx ('GoLeft f)  t = Cx f t
+  Cx ('GoRight f) t = Cx f t
+  Cx ('Pass f)    t = Cx f t
+  Cx 'End         t = ()
 
-type family GOpticConCx (p :: Maybe Path) where
-  GOpticConCx 'Nothing  = Applicative
-  GOpticConCx ('Just x) = Functor
 
 
 -- | Generic implementation of 'Lens' and 'Traversal' given a field
 -- name, the source and target generic representations, and the
 -- source and target types of the thing being focused by the optic.
-class GOptic (n :: Symbol) f g a b where
-  goptic :: (Functor t, GOpticCx n f t) => LensLike t (f x) (g x) a b
+class GOptic n f g a b where
+  goptic :: (Functor t, Cx n t) => LensLike t (f x) (g x) a b
 
-instance GOptic n f g a b => GOptic n (D1 c f) (D1 d g) a b where
-  goptic = _M1 . goptic @n
+instance f ~ g => GOptic 'Skip f g a b where
+  goptic = ignored
   {-# Inline goptic #-}
 
-instance (GOptic n f1 g1 a b, GOptic n f2 g2 a b) =>
-    GOptic n (f1 :+: f2) (g1 :+: g2) a b where
-  goptic f (L1 x) = L1 <$> goptic @n f x
-  goptic f (R1 x) = R1 <$> goptic @n f x
+instance GOptic p f g a b => GOptic ('Pass p) (M1 i c f) (M1 j d g) a b where
+  goptic = _M1 . goptic @p
   {-# Inline goptic #-}
 
-instance GOpticCon (Find n f) f g a b => GOptic n (C1 c f) (C1 d g) a b where
-  goptic = _M1 . gopticCon @(Find n f)
+instance (GOptic p f1 g1 a b, GOptic q f2 g2 a b) =>
+    GOptic ('Both p q) (f1 :+: f2) (g1 :+: g2) a b where
+  goptic f (L1 x) = L1 <$> goptic @p f x
+  goptic f (R1 x) = R1 <$> goptic @q f x
+  {-# Inline goptic #-}
+
+instance (x ~ x', GOptic p f g a b) => GOptic ('GoLeft p) (f :*: x) (g :*: x') a b where
+  goptic = _1 . goptic @p
+  {-# Inline goptic #-}
+
+instance (x ~ x', GOptic p f g a b) => GOptic ('GoRight p) (x :*: f) (x' :*: g) a b where
+  goptic = _2 . goptic @p
+  {-# Inline goptic #-}
+
+instance (a ~ a', b ~ b') => GOptic p (K1 i a) (K1 i b) a' b' where
+  goptic = _K1
   {-# Inline goptic #-}
 
 
+data Path = Pass Path | End | Skip | GoLeft Path | GoRight Path | Both Path Path
 
--- | This class dispatches either to a generic lens implementation
--- or the 'ignored' traversal depending on whether or not the target
--- field is a member of this constructor
-class GOpticCon p f g a b where
-  gopticCon :: GOpticConCx p t => LensLike t (f x) (g x) a b
+type family OrElse m n where
+  OrElse 'Skip 'Skip = 'Skip
+  OrElse 'Skip y     = 'GoRight y
+  OrElse x     y     = 'GoLeft x
 
--- | Constructors that do /not/ have this field are ignored
-instance f ~ g => GOpticCon 'Nothing f g a b where
-  gopticCon = ignored
-  {-# Inline gopticCon #-}
+type family Check m where
+  Check 'Skip = 'Skip
+  Check x     = 'Pass x
 
--- | Constructors that do have this field require a lens
-instance GLens p f g a b => GOpticCon ('Just p) f g a b where
-  gopticCon = glens @p
-  {-# Inline gopticCon #-}
+type family Find (s :: Symbol) (hay :: * -> *) :: Path where
+  Find s (D1 c f) = 'Pass (Find s f)
+  Find s (C1 c f) = Check (Find s f)
+  Find s (S1 ('MetaSel ('Just s) x y z) f) = 'Pass (Find s f)
+  Find s (S1 i f) = 'Skip
 
+  Find s (f :+: g) = 'Both (Find s f) (Find s g)
+  Find s V1        = 'Skip
 
-
--- | This class generically constructs lenses at the level
--- of fields in a constructor. The 'Path' parameter must
--- correspond to a field in the generic representation of
--- the data type. The parameters @f@ and @g@ are allowed
--- to vary just enough to allow the type of the focused field
--- to change.
-class GLens (p :: Path) f g a b where
-  glens :: Lens (f x) (g x) a b
-
-instance GLens p f g a b => GLens ('GoLeft p) (f :*: x) (g :*: x) a b where
-  glens = _1 . glens @p
-  {-# Inline glens #-}
-
-instance GLens p f g a b => GLens ('GoRight p) (x :*: f) (x :*: g) a b where
-  glens = _2 . glens @p
-  {-# Inline glens #-}
-
-instance GLens p f g a b => GLens p (S1 c f) (S1 d g) a b where
-  glens = _M1 . glens @p
-  {-# Inline glens #-}
-
-instance GLens p (K1 i a) (K1 i b) a b where
-  glens = _K1
-  {-# Inline glens #-}
-
-
-data{-kind-} Path = Here | GoLeft Path | GoRight Path
-
-type family OrElse (m :: Maybe Path) (n :: Maybe Path) :: Maybe Path where
-  OrElse ('Just x) y = 'Just ('GoLeft x)
-  OrElse x ('Just y) = 'Just ('GoRight y)
-  OrElse x y         = 'Nothing
-
-type family Find (s :: Symbol) (hay :: * -> *) :: Maybe Path where
-  Find s (D1 c f) = Find s f
-  Find s (C1 c f) = Find s f
-  Find s (S1 ('MetaSel ('Just s) x y z) f) = 'Just 'Here
   Find s (x :*: y) = Find s x `OrElse` Find s y
-  Find s t = 'Nothing
+  Find s U1        = 'Skip
+
+  Find s (K1 i a)  = 'End
 
 
 -- | More polymorphic than your standard 'generic'
@@ -127,11 +101,11 @@ generic' = iso from to
 genericOptic ::
   forall n s t a b f.
   ( Generic s, Generic t
-  , GOptic n (Rep s) (Rep t) a b
-  , GOpticCx n (Rep s) f
+  , GOptic (Find n (Rep s)) (Rep s) (Rep t) a b
+  , Cx (Find n (Rep s)) f
   , Functor f) =>
   LensLike f s t a b
-genericOptic = generic' . goptic @n
+genericOptic = generic' . goptic @(Find n (Rep s))
 {-# Inline genericOptic #-}
 
 ------------------------------------------------------------------------
@@ -160,7 +134,7 @@ data Example1 a b
   deriving Generic
 
 lensA :: Lens (Example1 a b) (Example1 a' b) [a] [a']
-lensA = cloneLens (genericOptic @"fieldA")
+lensA = fusing (genericOptic @"fieldA")
 
 traversalB :: Traversal (Example1 a b) (Example1 a b') b b'
 traversalB = boggling (genericOptic @"fieldB")
@@ -170,3 +144,14 @@ data HasPhantom a b = HasPhantom { hasPhantom :: b }
 
 lensP :: Lens (HasPhantom a b) (HasPhantom a' b') b b'
 lensP = genericOptic @"hasPhantom"
+
+data Maybe' a = Just' { fromJust' :: a } | Nothing'
+  deriving Generic
+
+justTraversal :: Traversal (Maybe' a) (Maybe' b) a b
+justTraversal = genericOptic @"fromJust'"
+
+data Empty deriving Generic
+
+emptyTraversal :: Traversal Empty Empty a b
+emptyTraversal = genericOptic @""
