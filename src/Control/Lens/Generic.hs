@@ -10,7 +10,6 @@ module Control.Lens.Generic (genericOptic) where
 
 import Control.Lens hiding (from,to)
 import GHC.TypeLits
-import Data.Kind
 import GHC.Generics
 import GHC.Generics.Lens
 import Boggle (boggling)
@@ -19,48 +18,47 @@ import Boggle (boggling)
 -- Class for generically deriving lenses
 ------------------------------------------------------------------------
 
-type family Cx p t :: Constraint where
-  Cx 'Skip        t = Applicative t
-  Cx ('Both f g)  t = (Cx f t, Cx g t)
-  Cx ('GoLeft f)  t = Cx f t
-  Cx ('GoRight f) t = Cx f t
-  Cx ('Pass f)    t = Cx f t
-  Cx 'End         t = ()
-
-
 
 -- | Generic implementation of 'Lens' and 'Traversal' given a field
 -- name, the source and target generic representations, and the
 -- source and target types of the thing being focused by the optic.
-class GOptic n f g a b where
-  goptic :: (Functor t, Cx n t) => LensLike t (f x) (g x) a b
+class Functor t => GOptic (p :: Path) t f g a b where
+  goptic :: LensLike t (f x) (g x) a b
 
-instance f ~ g => GOptic 'Skip f g a b where
+instance (Applicative t, f ~ g) =>
+         GOptic 'Skip t f g a b where
   goptic = ignored
   {-# Inline goptic #-}
 
-instance GOptic p f g a b => GOptic ('Pass p) (M1 i c f) (M1 j d g) a b where
+instance GOptic p t f g a b =>
+         GOptic ('Pass p) t (M1 i c f) (M1 j d g) a b where
   goptic = _M1 . goptic @p
   {-# Inline goptic #-}
 
-instance (GOptic p f1 g1 a b, GOptic q f2 g2 a b) =>
-    GOptic ('Both p q) (f1 :+: f2) (g1 :+: g2) a b where
+instance (GOptic p t f1 g1 a b, GOptic q t f2 g2 a b) =>
+         GOptic ('Both p q) t (f1 :+: f2) (g1 :+: g2) a b where
   goptic f (L1 x) = L1 <$> goptic @p f x
   goptic f (R1 x) = R1 <$> goptic @q f x
   {-# Inline goptic #-}
 
-instance (x ~ x', GOptic p f g a b) => GOptic ('GoLeft p) (f :*: x) (g :*: x') a b where
+instance (x ~ x', GOptic p t f g a b) =>
+         GOptic ('GoLeft p) t (f :*: x) (g :*: x') a b where
   goptic = _1 . goptic @p
   {-# Inline goptic #-}
 
-instance (x ~ x', GOptic p f g a b) => GOptic ('GoRight p) (x :*: f) (x' :*: g) a b where
+instance (x ~ x', GOptic p t f g a b) =>
+         GOptic ('GoRight p) t (x :*: f) (x' :*: g) a b where
   goptic = _2 . goptic @p
   {-# Inline goptic #-}
 
-instance (a ~ a', b ~ b') => GOptic p (K1 i a) (K1 i b) a' b' where
+instance (a ~ a', b ~ b', Functor t) =>
+         GOptic p t (K1 i a) (K1 i b) a' b' where
   goptic = _K1
   {-# Inline goptic #-}
 
+------------------------------------------------------------------------
+-- Instance resolution logic
+------------------------------------------------------------------------
 
 data Path = Pass Path | End | Skip | GoLeft Path | GoRight Path | Both Path Path
 
@@ -73,7 +71,7 @@ type family Check m where
   Check 'Skip = 'Skip
   Check x     = 'Pass x
 
-type family Find (s :: Symbol) (hay :: * -> *) :: Path where
+type family Find s f where
   Find s (D1 c f) = 'Pass (Find s f)
   Find s (C1 c f) = Check (Find s f)
   Find s (S1 ('MetaSel ('Just s) x y z) f) = 'Pass (Find s f)
@@ -87,6 +85,7 @@ type family Find (s :: Symbol) (hay :: * -> *) :: Path where
 
   Find s (K1 i a)  = 'End
 
+------------------------------------------------------------------------
 
 -- | More polymorphic than your standard 'generic'
 generic' :: (Generic a, Generic b) => Iso a b (Rep a x) (Rep b y)
@@ -101,9 +100,8 @@ generic' = iso from to
 genericOptic ::
   forall n s t a b f.
   ( Generic s, Generic t
-  , GOptic (Find n (Rep s)) (Rep s) (Rep t) a b
-  , Cx (Find n (Rep s)) f
-  , Functor f) =>
+  , GOptic (Find n (Rep s)) f (Rep s) (Rep t) a b
+  ) =>
   LensLike f s t a b
 genericOptic = generic' . goptic @(Find n (Rep s))
 {-# Inline genericOptic #-}
