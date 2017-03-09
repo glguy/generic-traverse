@@ -1,15 +1,13 @@
 {-# LANGUAGE
  DataKinds, TypeFamilies,
- TypeOperators,
  MultiParamTypeClasses, UndecidableInstances, FlexibleContexts, FlexibleInstances,
- ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes #-}
+ TypeOperators, ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes #-}
 
 {-# LANGUAGE DeriveGeneric #-}
 
 module Control.Lens.Generic (genericOptic) where
 
 import Control.Lens hiding (from,to)
-import GHC.TypeLits
 import GHC.Generics
 import GHC.Generics.Lens
 import Boggle (boggling)
@@ -52,7 +50,7 @@ instance (x ~ x', GOptic p t f g a b) =>
   {-# Inline goptic #-}
 
 instance (a ~ a', b ~ b', Functor t) =>
-         GOptic p t (K1 i a) (K1 i b) a' b' where
+         GOptic 'End t (K1 i a) (K1 i b) a' b' where
   goptic = _K1
   {-# Inline goptic #-}
 
@@ -71,18 +69,21 @@ type family Check m where
   Check 'Skip = 'Skip
   Check x     = 'Pass x
 
+type family Both' m n where
+  Both' 'Skip 'Skip = 'Skip
+  Both' x     y     = 'Both x y
+
 type family Find s f where
   Find s (D1 c f) = 'Pass (Find s f)
   Find s (C1 c f) = Check (Find s f)
   Find s (S1 ('MetaSel ('Just s) x y z) f) = 'Pass (Find s f)
   Find s (S1 i f) = 'Skip
 
-  Find s (f :+: g) = 'Both (Find s f) (Find s g)
+  Find s (f :+: g) = Find s f `Both'` Find s g
   Find s V1        = 'Skip
 
   Find s (x :*: y) = Find s x `OrElse` Find s y
   Find s U1        = 'Skip
-
   Find s (K1 i a)  = 'End
 
 ------------------------------------------------------------------------
@@ -98,12 +99,13 @@ generic' = iso from to
 -- on record field name. To construct a 'Lens', the field name
 -- must appear in all of the data constructors of the target type.
 genericOptic ::
-  forall n s t a b f.
-  ( Generic s, Generic t
-  , GOptic (Find n (Rep s)) f (Rep s) (Rep t) a b
+  forall n s t a b f p.
+  ( p ~ Find n (Rep s)
+  , Generic s, Generic t
+  , GOptic p f (Rep s) (Rep t) a b
   ) =>
   LensLike f s t a b
-genericOptic = generic' . goptic @(Find n (Rep s))
+genericOptic = generic' . goptic @p
 {-# Inline genericOptic #-}
 
 ------------------------------------------------------------------------
@@ -152,4 +154,4 @@ justTraversal = genericOptic @"fromJust'"
 data Empty deriving Generic
 
 emptyTraversal :: Traversal Empty Empty a b
-emptyTraversal = genericOptic @""
+emptyTraversal = genericOptic -- It doesn't matter what the symbol is!
