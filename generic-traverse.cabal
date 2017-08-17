@@ -32,7 +32,9 @@ library
                        Boggle.Enum
                        Boggle.Read
 
-  build-depends:       base >=4.9 && <4.10, lens >= 4.15 && <4.16
+  build-depends:       base >=4.9 && <4.11,
+                       lens >= 4.15 && <4.16,
+                       kan-extensions >=5.0 && <5.1
 
   hs-source-dirs:      src
   default-language:    Haskell2010

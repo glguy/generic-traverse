@@ -5,12 +5,15 @@
 
 {-# LANGUAGE DeriveGeneric #-}
 
-module Control.Lens.Generic (genericOptic) where
+module Control.Lens.Generic where
 
 import Control.Lens hiding (from,to)
+import Data.Type.Bool
+import Data.Kind
 import GHC.Generics
 import GHC.Generics.Lens
-import Boggle (boggling)
+import Boggle (Boggle, boggling)
+import Data.Functor.Yoneda
 
 ------------------------------------------------------------------------
 -- Class for generically deriving lenses
@@ -55,6 +58,21 @@ instance (a ~ a', b ~ b', Functor t) =>
   {-# Inline goptic #-}
 
 ------------------------------------------------------------------------
+-- Optimizer selection
+------------------------------------------------------------------------
+
+class Optimizer (x :: Bool) where
+  optimizer ::
+    If x Applicative Functor f =>
+    LensLike (If x Boggle Yoneda f) s t a b -> LensLike f s t a b
+
+instance Optimizer 'True where
+  optimizer = boggling
+
+instance Optimizer 'False where
+  optimizer = fusing
+
+------------------------------------------------------------------------
 -- Instance resolution logic
 ------------------------------------------------------------------------
 
@@ -86,6 +104,14 @@ type family Find s f where
   Find s U1        = 'Skip
   Find s (K1 i a)  = 'End
 
+type family HasSkip p where
+  HasSkip 'Skip        = 'True
+  HasSkip 'End         = 'False
+  HasSkip ('Both x y)  = HasSkip x || HasSkip y
+  HasSkip ('Pass x)    = HasSkip x
+  HasSkip ('GoLeft x)  = HasSkip x
+  HasSkip ('GoRight x) = HasSkip x
+
 ------------------------------------------------------------------------
 
 -- | More polymorphic than your standard 'generic'
@@ -98,15 +124,29 @@ generic' = iso from to
 -- | Generically compute either a 'Lens' or a 'Traversal' based
 -- on record field name. To construct a 'Lens', the field name
 -- must appear in all of the data constructors of the target type.
-genericOptic ::
+basicGenericOptic ::
   forall n s t a b f p.
   ( p ~ Find n (Rep s)
   , Generic s, Generic t
   , GOptic p f (Rep s) (Rep t) a b
   ) =>
   LensLike f s t a b
-genericOptic = generic' . goptic @p
+basicGenericOptic = generic' . goptic @p
+{-# Inline basicGenericOptic #-}
+
+genericOptic ::
+  forall n s t a b f p x.
+  ( p ~ Find n (Rep s)
+  , x ~ HasSkip p
+  , Generic s, Generic t
+  , GOptic p (If x Boggle Yoneda f) (Rep s) (Rep t) a b
+  , If x Applicative Functor f
+  , Optimizer x
+  ) =>
+  LensLike f s t a b
+genericOptic = optimizer @(HasSkip p) (basicGenericOptic @n)
 {-# Inline genericOptic #-}
+
 
 ------------------------------------------------------------------------
 -- Example use-case
@@ -134,10 +174,10 @@ data Example1 a b
   deriving Generic
 
 lensA :: Lens (Example1 a b) (Example1 a' b) [a] [a']
-lensA = fusing (genericOptic @"fieldA")
+lensA = genericOptic @"fieldA"
 
 traversalB :: Traversal (Example1 a b) (Example1 a b') b b'
-traversalB = boggling (genericOptic @"fieldB")
+traversalB = genericOptic @"fieldB"
 
 data HasPhantom a b = HasPhantom { hasPhantom :: b }
   deriving Generic
