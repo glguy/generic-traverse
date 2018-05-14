@@ -30,7 +30,7 @@
 -- >   Lift ::             f a -> Normal2 f a
 --
 -- While this type on its own is simpler than some of the types that follow,
--- implementing '<$>' and '<*>' for this type would require recusion to deal
+-- implementing '<$>' and '<*>' for this type would require recursion to deal
 -- with the left-recursion found in this type:
 --
 -- > f <$> Ap mg mx   = Ap ((f .) <$> mg) mx
@@ -70,7 +70,7 @@
 -- [/typed tagless final encodings/]
 --
 --     The /typed tagless final/ approach for writing a computation involves
---     defining the signature of the operations that a compution can be
+--     defining the signature of the operations that a computation can be
 --     constructed from and then defining values completely within that
 --     signature. This technique will specifically apply to computations
 --     written generically in terms of the 'Applicative' signature.
@@ -82,7 +82,7 @@
 --
 --     It happens that it is now quite common to define computations in this
 --     style with classes like 'Functor' and 'Applicative' due to the
---     popularlity of the @lens@ package and it's heavy use of this pattern.
+--     popularity of the @lens@ package and its heavy use of this pattern.
 module Boggle
   ( Boggle(..)
   , boggling
