@@ -1,5 +1,7 @@
 .*.swp
 /dist
+/dist-newstyle
+.ghc.environment.*
 /.stack-work
 stack.yaml
 *.hi

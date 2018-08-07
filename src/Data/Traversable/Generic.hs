@@ -1,9 +1,10 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE EmptyCase #-}
 
 -- |
 -- This module generates implementations of the 'traverse' operation which
--- make it possible for GHC to optimize away the GHC.Generics value
+-- make it possible for GHC to optimize away the "GHC.Generics" value
 -- representation.
 module Data.Traversable.Generic
   (
@@ -19,7 +20,7 @@ import GHC.Generics     (Generic1, Rep1, to1, from1, (:*:)(..), (:+:)(..),
                          M1(..), K1(..), Rec1(..), Par1(..), U1(..), V1)
 import GHC.Exts         (inline)
 
--- NOTE: genericTraversal an gtraverse must be explicitly marked
+-- NOTE: 'genericTraverse' and 'gtraverse' must be explicitly marked
 -- for inlining as they need to inline across module boundaries
 -- for GHC to optimize away the generics representation. The other
 -- functions don't *need* to be marked for inlining because GHC
@@ -61,7 +62,7 @@ instance GTraversable U1 where
   {-# INLINE gtraverse #-}
 
 instance GTraversable V1 where
-  gtraverse _ v = v `seq` error "GTraversal/V1: gtraverse"
+  gtraverse _ v = case v of {}
   {-# INLINE gtraverse #-}
 
 instance GTraversable (K1 i a) where

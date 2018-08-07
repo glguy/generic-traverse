@@ -99,7 +99,7 @@ module Boggle
   , ApK(..), (<<.>), liftApK, lowerApK
   -- * '<.>' reassociation
   , ApK1(..), liftApK1, lowerApK1
-  -- * pure elminination
+  -- * pure elimination
   , PureK(..), liftPureK, lowerPureK
   -- * '>>=' reassociation
   , BindK(..), liftBindK, lowerBindK, liftBindK1, liftBindK2
