@@ -19,7 +19,7 @@ import GHC.Generics     (Generic1, Rep1, to1, from1, (:*:)(..), (:+:)(..),
                          M1(..), K1(..), Rec1(..), Par1(..), U1(..), V1)
 import GHC.Exts         (inline)
 
--- NOTE: genericTraversal an gtraverse must be explicitly marked
+-- NOTE: genericTraversal and gtraverse must be explicitly marked
 -- for inlining as they need to inline across module boundaries
 -- for GHC to optimize away the generics representation. The other
 -- functions don't *need* to be marked for inlining because GHC
